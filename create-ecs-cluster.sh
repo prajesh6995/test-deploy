@@ -30,6 +30,16 @@ check_error() {
   fi
 }
 
+# Function to retrieve ARN or exit if not found
+get_arn_or_exit() {
+  local resource_name=$1
+  local arn=$2
+  if [ "$arn" == "None" ] || [ -z "$arn" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: $resource_name ARN not found."
+    exit 1
+  fi
+}
+
 # Check and Create VPC
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Checking for existing VPC..."
 VPC_ID=$(aws ec2 describe-vpcs --filters Name=cidr-block,Values=$VPC_CIDR --query 'Vpcs[0].VpcId' --output text)
@@ -110,6 +120,7 @@ if [ "$ALB_ARN" == "None" ]; then
   check_error "Failed to create Load Balancer"
   sleep 20  # Allow time for ALB to become available
 fi
+get_arn_or_exit "Load Balancer" "$ALB_ARN"
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Load Balancer ARN: $ALB_ARN"
 
 # Create Target Group
@@ -119,6 +130,7 @@ if [ "$TG_ARN" == "None" ]; then
   TG_ARN=$(aws elbv2 create-target-group --name $TG_NAME --protocol HTTP --port $PORT --vpc-id $VPC_ID --health-check-protocol HTTP --health-check-port traffic-port --health-check-path / --query 'TargetGroups[0].TargetGroupArn' --output text)
   check_error "Failed to create Target Group"
 fi
+get_arn_or_exit "Target Group" "$TG_ARN"
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Target Group ARN: $TG_ARN"
 
 # Associate Target Group with Load Balancer
@@ -137,6 +149,7 @@ if [ "$EXECUTION_ROLE_ARN" == "None" ]; then
   aws iam attach-role-policy --role-name $EXECUTION_ROLE_NAME --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
   check_error "Failed to create Execution Role"
 fi
+get_arn_or_exit "Execution Role" "$EXECUTION_ROLE_ARN"
 
 TASK_ROLE_ARN=$(aws iam get-role --role-name $TASK_ROLE_NAME --query 'Role.Arn' --output text 2>/dev/null)
 if [ "$TASK_ROLE_ARN" == "None" ]; then
@@ -144,6 +157,7 @@ if [ "$TASK_ROLE_ARN" == "None" ]; then
   TASK_ROLE_ARN=$(aws iam create-role --role-name $TASK_ROLE_NAME --assume-role-policy-document file://ecs-trust-policy.json --query 'Role.Arn' --output text)
   check_error "Failed to create Task Role"
 fi
+get_arn_or_exit "Task Role" "$TASK_ROLE_ARN"
 
 # ECS Cluster Creation
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Cluster..."
@@ -154,8 +168,8 @@ check_error "Failed to create ECS Cluster"
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Registering Task Definition..."
 aws ecs register-task-definition --family $TASK_FAMILY \
   --network-mode awsvpc \
-  --execution-role-arn $EXECUTION_ROLE_ARN \
-  --task-role-arn $TASK_ROLE_ARN \
+  --execution-role-arn "$EXECUTION_ROLE_ARN" \
+  --task-role-arn "$TASK_ROLE_ARN" \
   --container-definitions "[
     {
       \"name\": \"$CONTAINER_NAME\",
