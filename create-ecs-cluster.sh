@@ -15,6 +15,8 @@ SUBNET_CIDR2="10.0.2.0/24"
 ALB_NAME="nginx-alb"
 TG_NAME="nginx-tg"
 SG_NAME="nginx-sg"
+ALB_ARN=""
+TG_ARN=""
 
 # Function to check for errors
 check_error() {
@@ -41,7 +43,7 @@ if [ "$SUBNET_ID1" == "None" ]; then
   SUBNET_ID1=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block $SUBNET_CIDR1 --query 'Subnet.SubnetId' --output text)
   check_error "Failed to create Subnet 1"
 fi
-\SUBNET_ID2=$(aws ec2 describe-subnets --filters Name=cidr-block,Values=$SUBNET_CIDR2 --query 'Subnets[0].SubnetId' --output text)
+SUBNET_ID2=$(aws ec2 describe-subnets --filters Name=cidr-block,Values=$SUBNET_CIDR2 --query 'Subnets[0].SubnetId' --output text)
 if [ "$SUBNET_ID2" == "None" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Subnet 2..."
   SUBNET_ID2=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block $SUBNET_CIDR2 --query 'Subnet.SubnetId' --output text)
@@ -98,14 +100,19 @@ echo "ALB ARN: $ALB_ARN"
 echo "Target Group ARN: $TG_ARN"
 
 # Ensure Target Group is associated with ALB
-TG_ASSOCIATION=$(aws elbv2 describe-listeners --load-balancer-arn $ALB_ARN --query 'Listeners[?DefaultActions[0].TargetGroupArn==`'$TG_ARN'`].ListenerArn' --output text 2>/dev/null)
-if [ -z "$TG_ASSOCIATION" ]; then
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - Associating Target Group with Load Balancer..."
-  aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port 80 --default-actions Type=forward,TargetGroupArn=$TG_ARN
-  check_error "Failed to associate Target Group with Load Balancer"
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - Target Group associated with Load Balancer."
+if [ -n "$ALB_ARN" ] && [ -n "$TG_ARN" ]; then
+  TG_ASSOCIATION=$(aws elbv2 describe-listeners --load-balancer-arn $ALB_ARN --query 'Listeners[?DefaultActions[0].TargetGroupArn==`'$TG_ARN'`].ListenerArn' --output text 2>/dev/null)
+  if [ -z "$TG_ASSOCIATION" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Associating Target Group with Load Balancer..."
+    aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port 80 --default-actions Type=forward,TargetGroupArn=$TG_ARN
+    check_error "Failed to associate Target Group with Load Balancer"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Target Group associated with Load Balancer."
+  else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Target Group '$TG_NAME' is already associated with Load Balancer '$ALB_NAME'."
+  fi
 else
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - Target Group '$TG_NAME' is already associated with Load Balancer '$ALB_NAME'."
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: ALB ARN or Target Group ARN is missing. Cannot associate Target Group with Load Balancer."
+  exit 1
 fi
 
 # Register ECS Task Definition
