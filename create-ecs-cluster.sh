@@ -93,12 +93,12 @@ if [ "$SUBNET_ID2" == "None" ] || [ -z "$SUBNET_ID2" ]; then
   aws ec2 modify-subnet-attribute --subnet-id $SUBNET_ID2 --map-public-ip-on-launch
 fi
 
-# Validate subnets belong to the same VPC
-SUBNET1_VPC_ID=$(aws ec2 describe-subnets --subnet-ids $SUBNET_ID1 --query 'Subnets[0].VpcId' --output text)
-SUBNET2_VPC_ID=$(aws ec2 describe-subnets --subnet-ids $SUBNET_ID2 --query 'Subnets[0].VpcId' --output text)
+# Validate subnets belong to the same VPC and are in different AZs
+SUBNET1_AZ=$(aws ec2 describe-subnets --subnet-ids $SUBNET_ID1 --query 'Subnets[0].AvailabilityZone' --output text)
+SUBNET2_AZ=$(aws ec2 describe-subnets --subnet-ids $SUBNET_ID2 --query 'Subnets[0].AvailabilityZone' --output text)
 
-if [ "$SUBNET1_VPC_ID" != "$SUBNET2_VPC_ID" ]; then
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Subnets $SUBNET_ID1 and $SUBNET_ID2 belong to different VPCs."
+if [ "$SUBNET1_AZ" == "$SUBNET2_AZ" ]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Subnets are in the same Availability Zone: $SUBNET1_AZ. Ensure subnets are in different AZs."
   exit 1
 fi
 
