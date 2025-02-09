@@ -43,7 +43,7 @@ get_arn_or_exit() {
 # Check and Create VPC
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Checking for existing VPC..."
 VPC_ID=$(aws ec2 describe-vpcs --filters Name=cidr-block,Values=$VPC_CIDR --query 'Vpcs[0].VpcId' --output text)
-if [ "$VPC_ID" == "None" ]; then
+if [ "$VPC_ID" == "None" ] || [ -z "$VPC_ID" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating VPC..."
   VPC_ID=$(aws ec2 create-vpc --cidr-block $VPC_CIDR --query 'Vpc.VpcId' --output text)
   check_error "Failed to create VPC"
@@ -56,7 +56,7 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') - VPC ID: $VPC_ID"
 
 # Create and attach Internet Gateway
 IGW_ID=$(aws ec2 describe-internet-gateways --filters Name=attachment.vpc-id,Values=$VPC_ID --query 'InternetGateways[0].InternetGatewayId' --output text)
-if [ "$IGW_ID" == "None" ]; then
+if [ "$IGW_ID" == "None" ] || [ -z "$IGW_ID" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating and attaching Internet Gateway..."
   IGW_ID=$(aws ec2 create-internet-gateway --query 'InternetGateway.InternetGatewayId' --output text)
   check_error "Failed to create Internet Gateway"
@@ -66,7 +66,7 @@ fi
 
 # Create Route Table and associate with subnets
 ROUTE_TABLE_ID=$(aws ec2 describe-route-tables --filters Name=vpc-id,Values=$VPC_ID --query 'RouteTables[0].RouteTableId' --output text)
-if [ "$ROUTE_TABLE_ID" == "None" ]; then
+if [ "$ROUTE_TABLE_ID" == "None" ] || [ -z "$ROUTE_TABLE_ID" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Route Table..."
   ROUTE_TABLE_ID=$(aws ec2 create-route-table --vpc-id $VPC_ID --query 'RouteTable.RouteTableId' --output text)
   check_error "Failed to create Route Table"
@@ -76,7 +76,7 @@ fi
 
 # Create Subnets in Different AZs
 SUBNET_ID1=$(aws ec2 describe-subnets --filters Name=cidr-block,Values=$SUBNET_CIDR1 --query 'Subnets[0].SubnetId' --output text)
-if [ "$SUBNET_ID1" == "None" ]; then
+if [ "$SUBNET_ID1" == "None" ] || [ -z "$SUBNET_ID1" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Subnet 1 in $AZ1..."
   SUBNET_ID1=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block $SUBNET_CIDR1 --availability-zone $AZ1 --query 'Subnet.SubnetId' --output text)
   check_error "Failed to create Subnet 1"
@@ -85,7 +85,7 @@ if [ "$SUBNET_ID1" == "None" ]; then
 fi
 
 SUBNET_ID2=$(aws ec2 describe-subnets --filters Name=cidr-block,Values=$SUBNET_CIDR2 --query 'Subnets[0].SubnetId' --output text)
-if [ "$SUBNET_ID2" == "None" ]; then
+if [ "$SUBNET_ID2" == "None" ] || [ -z "$SUBNET_ID2" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Subnet 2 in $AZ2..."
   SUBNET_ID2=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block $SUBNET_CIDR2 --availability-zone $AZ2 --query 'Subnet.SubnetId' --output text)
   check_error "Failed to create Subnet 2"
@@ -104,7 +104,7 @@ fi
 
 # Create Security Group
 SG_ID=$(aws ec2 describe-security-groups --filters Name=group-name,Values=$SG_NAME --query 'SecurityGroups[0].GroupId' --output text)
-if [ "$SG_ID" == "None" ]; then
+if [ "$SG_ID" == "None" ] || [ -z "$SG_ID" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Security Group..."
   SG_ID=$(aws ec2 create-security-group --group-name $SG_NAME --description "Security group for NGINX ALB" --vpc-id $VPC_ID --query 'GroupId' --output text)
   check_error "Failed to create Security Group"
@@ -116,7 +116,7 @@ fi
 ALB_ARN=$(aws elbv2 describe-load-balancers --names $ALB_NAME --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null)
 if [ "$ALB_ARN" == "None" ] || [ -z "$ALB_ARN" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Load Balancer..."
-  ALB_ARN=$(aws elbv2 create-load-balancer --name $ALB_NAME --subnets $SUBNET_ID1 $SUBNET_ID2 --security-groups $SG_ID --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+  ALB_ARN=$(aws elbv2 create-load-balancer --name $ALB_NAME --subnets $SUBNET_ID1  --security-groups $SG_ID --query 'LoadBalancers[0].LoadBalancerArn' --output text)
   check_error "Failed to create Load Balancer"
   sleep 30  # Allow time for ALB to become available
 fi
