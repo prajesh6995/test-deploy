@@ -34,6 +34,30 @@ if [ "$VPC_ID" == "None" ]; then
 fi
 echo "$(date '+%Y-%m-%d %H:%M:%S') - VPC ID: $VPC_ID"
 
+# Create Subnets
+SUBNET_ID1=$(aws ec2 describe-subnets --filters Name=cidr-block,Values=$SUBNET_CIDR1 --query 'Subnets[0].SubnetId' --output text)
+if [ "$SUBNET_ID1" == "None" ]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Subnet 1..."
+  SUBNET_ID1=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block $SUBNET_CIDR1 --query 'Subnet.SubnetId' --output text)
+  check_error "Failed to create Subnet 1"
+fi
+\SUBNET_ID2=$(aws ec2 describe-subnets --filters Name=cidr-block,Values=$SUBNET_CIDR2 --query 'Subnets[0].SubnetId' --output text)
+if [ "$SUBNET_ID2" == "None" ]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Subnet 2..."
+  SUBNET_ID2=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block $SUBNET_CIDR2 --query 'Subnet.SubnetId' --output text)
+  check_error "Failed to create Subnet 2"
+fi
+
+# Create Security Group
+SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters Name=group-name,Values=$SG_NAME --query 'SecurityGroups[0].GroupId' --output text)
+if [ "$SECURITY_GROUP_ID" == "None" ]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Security Group..."
+  SECURITY_GROUP_ID=$(aws ec2 create-security-group --group-name $SG_NAME --description "Security group for NGINX ALB" --vpc-id $VPC_ID --query 'GroupId' --output text)
+  check_error "Failed to create Security Group"
+  aws ec2 authorize-security-group-ingress --group-id $SECURITY_GROUP_ID --protocol tcp --port 80 --cidr 0.0.0.0/0
+  check_error "Failed to set Security Group ingress rule"
+fi
+
 # Enable Container Insights for the ECS Cluster
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Checking ECS Cluster status before enabling Container Insights..."
 CLUSTER_STATUS=$(aws ecs describe-clusters --clusters $CLUSTER_NAME --query "clusters[0].status" --output text 2>/dev/null)
@@ -68,6 +92,10 @@ else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Target Group '$TG_NAME' already exists."
   TG_ARN=$TG_EXISTS
 fi
+
+# Debug logs for ALB and TG ARNs
+echo "ALB ARN: $ALB_ARN"
+echo "Target Group ARN: $TG_ARN"
 
 # Ensure Target Group is associated with ALB
 TG_ASSOCIATION=$(aws elbv2 describe-listeners --load-balancer-arn $ALB_ARN --query 'Listeners[?DefaultActions[0].TargetGroupArn==`'$TG_ARN'`].ListenerArn' --output text 2>/dev/null)
