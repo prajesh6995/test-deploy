@@ -39,8 +39,8 @@ if [ "$VPC_ID" == "None" ]; then
   check_error "Failed to create VPC"
 
   # Enable public DNS hostname for VPC
-  aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-support "{"Value":true}"
-  aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-hostnames "{"Value":true}"
+  aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-support '{"Value":true}'
+  aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-hostnames '{"Value":true}'
 fi
 echo "$(date '+%Y-%m-%d %H:%M:%S') - VPC ID: $VPC_ID"
 
@@ -103,16 +103,17 @@ if [ "$SG_ID" == "None" ]; then
 fi
 
 # Create Load Balancer
-ALB_ARN=$(aws elbv2 describe-load-balancers --names $ALB_NAME --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+ALB_ARN=$(aws elbv2 describe-load-balancers --names $ALB_NAME --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null)
 if [ "$ALB_ARN" == "None" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Load Balancer..."
   ALB_ARN=$(aws elbv2 create-load-balancer --name $ALB_NAME --subnets $SUBNET_ID1 $SUBNET_ID2 --security-groups $SG_ID --query 'LoadBalancers[0].LoadBalancerArn' --output text)
   check_error "Failed to create Load Balancer"
+  sleep 20  # Allow time for ALB to become available
 fi
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Load Balancer ARN: $ALB_ARN"
 
 # Create Target Group
-TG_ARN=$(aws elbv2 describe-target-groups --names $TG_NAME --query 'TargetGroups[0].TargetGroupArn' --output text)
+TG_ARN=$(aws elbv2 describe-target-groups --names $TG_NAME --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null)
 if [ "$TG_ARN" == "None" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Target Group..."
   TG_ARN=$(aws elbv2 create-target-group --name $TG_NAME --protocol HTTP --port $PORT --vpc-id $VPC_ID --health-check-protocol HTTP --health-check-port traffic-port --health-check-path / --query 'TargetGroups[0].TargetGroupArn' --output text)
@@ -121,7 +122,7 @@ fi
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Target Group ARN: $TG_ARN"
 
 # Associate Target Group with Load Balancer
-LISTENER_ARN=$(aws elbv2 describe-listeners --load-balancer-arn $ALB_ARN --query 'Listeners[0].ListenerArn' --output text)
+LISTENER_ARN=$(aws elbv2 describe-listeners --load-balancer-arn $ALB_ARN --query 'Listeners[0].ListenerArn' --output text 2>/dev/null)
 if [ "$LISTENER_ARN" == "None" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Listener for Load Balancer..."
   aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT --default-actions Type=forward,TargetGroupArn=$TG_ARN
