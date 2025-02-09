@@ -50,6 +50,15 @@ if [ "$SUBNET_ID2" == "None" ]; then
   check_error "Failed to create Subnet 2"
 fi
 
+# Validate subnets belong to the same VPC
+SUBNET1_VPC_ID=$(aws ec2 describe-subnets --subnet-ids $SUBNET_ID1 --query 'Subnets[0].VpcId' --output text)
+SUBNET2_VPC_ID=$(aws ec2 describe-subnets --subnet-ids $SUBNET_ID2 --query 'Subnets[0].VpcId' --output text)
+
+if [ "$SUBNET1_VPC_ID" != "$SUBNET2_VPC_ID" ]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Subnets $SUBNET_ID1 and $SUBNET_ID2 belong to different VPCs."
+  exit 1
+fi
+
 # Create Security Group
 SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters Name=group-name,Values=$SG_NAME --query 'SecurityGroups[0].GroupId' --output text)
 if [ "$SECURITY_GROUP_ID" == "None" ]; then
