@@ -73,6 +73,7 @@ fi
 
 # Check and Create Application Load Balancer
 ALB_EXISTS=$(aws elbv2 describe-load-balancers --names $ALB_NAME --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null)
+echo "ALB ARN if exist: $ALB_EXISTS"
 if [ "$ALB_EXISTS" == "None" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Application Load Balancer..."
   ALB_ARN=$(aws elbv2 create-load-balancer --name $ALB_NAME --subnets $SUBNET_ID1 $SUBNET_ID2 --security-groups $SECURITY_GROUP_ID --scheme internet-facing --type application --query 'LoadBalancers[0].LoadBalancerArn' --output text)
@@ -85,6 +86,8 @@ fi
 
 # Check and Create Target Group
 TG_EXISTS=$(aws elbv2 describe-target-groups --names $TG_NAME --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null)
+
+echo "Target Group ARN exist: $TG_EXISTS"
 if [ "$TG_EXISTS" == "None" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Target Group..."
   TG_ARN=$(aws elbv2 create-target-group --name $TG_NAME --protocol HTTP --port $PORT --vpc-id $VPC_ID --target-type ip --query 'TargetGroups[0].TargetGroupArn' --output text)
