@@ -116,7 +116,7 @@ fi
 ALB_ARN=$(aws elbv2 describe-load-balancers --names $ALB_NAME --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null)
 if [ "$ALB_ARN" == "None" ] || [ -z "$ALB_ARN" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Load Balancer..."
-  ALB_ARN=$(aws elbv2 create-load-balancer --name $ALB_NAME --subnets $SUBNET_ID1  --security-groups $SG_ID --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+  ALB_ARN=$(aws elbv2 create-load-balancer --name $ALB_NAME --subnets $SUBNET_ID1 $SUBNET_ID2 --security-groups $SG_ID --query 'LoadBalancers[0].LoadBalancerArn' --output text)
   check_error "Failed to create Load Balancer"
   sleep 30  # Allow time for ALB to become available
 fi
