@@ -48,7 +48,7 @@ else
 fi
 
 # Create VPC
-VPC_ID=$(aws ec2 describe-vpcs --filters "Name=cidr-block,Values=$VPC_CIDR" --query 'Vpcs[?State==`available`].VpcId' --output text)
+VPC_ID=$(aws ec2 describe-vpcs --filters "Name=cidr-block,Values=$VPC_CIDR" --query 'Vpcs[?State==`available`].VpcId' --output text | awk '{print $1}')
 if [ -z "$VPC_ID" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating VPC..."
   VPC_ID=$(aws ec2 create-vpc --cidr-block $VPC_CIDR --query 'Vpc.VpcId' --output text)
@@ -73,7 +73,13 @@ else
 fi
 
 # Create Route Table and associate with subnets
-ROUTE_TABLE_ID=$(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" --query 'RouteTables[0].RouteTableId' --output text)
+ROUTE_TABLE_ID=$(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" --query 'RouteTables[?Associations[0].Main==`true`].RouteTableId' --output text)
+if [ -z "$ROUTE_TABLE_ID" ]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Route Table..."
+  ROUTE_TABLE_ID=$(aws ec2 create-route-table --vpc-id $VPC_ID --query 'RouteTable.RouteTableId' --output text)
+  check_error "Failed to create Route Table"
+fi
+
 if ! aws ec2 describe-route-tables --route-table-ids $ROUTE_TABLE_ID --query 'Routes[?DestinationCidrBlock==`0.0.0.0/0`]' --output text | grep -q '0.0.0.0/0'; then
   aws ec2 create-route --route-table-id $ROUTE_TABLE_ID --destination-cidr-block 0.0.0.0/0 --gateway-id $IGW_ID
   check_error "Failed to create route to Internet Gateway"
@@ -118,7 +124,6 @@ if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups
 else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Egress rule already exists."
 fi
-
 # Create Load Balancer for Reverse Proxy
 ALB_ARN=$(aws elbv2 create-load-balancer --name $ALB_NAME --subnets $SUBNET_ID1 $SUBNET_ID2 --security-groups $SG_ID --query 'LoadBalancers[0].LoadBalancerArn' --output text)
 check_error "Failed to create Load Balancer"
