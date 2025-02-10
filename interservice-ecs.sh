@@ -2,30 +2,24 @@
 
 # Set variables
 CLUSTER_NAME="nginx-cluster"
-SERVICE_NAME="nginx-service"
-TASK_FAMILY="nginx-task"
-CONTAINER_NAME="nginx-container"
-IMAGE_URI="nginx:latest"  # NGINX official image
-PORT=80
-
-# Variables for NGINX Proxy Manager
-PROXY_SERVICE_NAME="nginx-proxy-manager-service"
-PROXY_TASK_FAMILY="nginx-proxy-manager-task"
-PROXY_CONTAINER_NAME="nginx-proxy-manager-container"
-PROXY_IMAGE_URI="jc21/nginx-proxy-manager:latest"
-PROXY_PORT=81
-
+SERVICE_NAME_NGINX="nginx-service"
+SERVICE_NAME_NPM="nginx-proxy-manager-service"
+TASK_FAMILY_NGINX="nginx-task"
+TASK_FAMILY_NPM="nginx-proxy-manager-task"
+CONTAINER_NAME_NGINX="nginx-container"
+CONTAINER_NAME_NPM="nginx-proxy-manager-container"
+IMAGE_URI_NGINX="nginx:latest"  # NGINX official image
+IMAGE_URI_NPM="jc21/nginx-proxy-manager:latest"  # Nginx Proxy Manager image
+PORT_NGINX=80
+PORT_NPM=81
 REGION="us-east-1"
 VPC_CIDR="10.0.0.0/16"
 SUBNET_CIDR1="10.0.1.0/24"
 SUBNET_CIDR2="10.0.2.0/24"
-
-# ALB and SG names for both services
 ALB_NAME="nginx-alb"
-TG_NAME="nginx-tg"
-PROXY_TG_NAME="nginx-proxy-tg"
+TG_NAME_NGINX="nginx-tg"
+TG_NAME_NPM="nginx-proxy-manager-tg"
 SG_NAME="nginx-sg"
-
 EXECUTION_ROLE_NAME="ecsTaskExecutionRole"
 TASK_ROLE_NAME="ecsTaskRole"
 
@@ -86,6 +80,7 @@ else
 fi
 
 # Create Subnets in Different AZs
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Subnet 1 in $AZ1..."
 SUBNET_ID1=$(aws ec2 describe-subnets --filters "Name=cidr-block,Values=$SUBNET_CIDR1" --query 'Subnets[0].SubnetId' --output text)
 if [ -z "$SUBNET_ID1" ]; then
   SUBNET_ID1=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block $SUBNET_CIDR1 --availability-zone $AZ1 --query 'Subnet.SubnetId' --output text)
@@ -96,6 +91,7 @@ else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Subnet 1 already exists with ID $SUBNET_ID1."
 fi
 
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Subnet 2 in $AZ2..."
 SUBNET_ID2=$(aws ec2 describe-subnets --filters "Name=cidr-block,Values=$SUBNET_CIDR2" --query 'Subnets[0].SubnetId' --output text)
 if [ -z "$SUBNET_ID2" ]; then
   SUBNET_ID2=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block $SUBNET_CIDR2 --availability-zone $AZ2 --query 'Subnet.SubnetId' --output text)
@@ -107,9 +103,10 @@ else
 fi
 
 # Create Security Group
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Security Group..."
 SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=$SG_NAME" "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text)
 if [ -z "$SG_ID" ]; then
-  SG_ID=$(aws ec2 create-security-group --group-name $SG_NAME --description "Security group for NGINX services" --vpc-id $VPC_ID --query 'GroupId' --output text)
+  SG_ID=$(aws ec2 create-security-group --group-name $SG_NAME --description "Security group for NGINX ALB" --vpc-id $VPC_ID --query 'GroupId' --output text)
   check_error "Failed to create Security Group"
 else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Security Group already exists with ID $SG_ID."
@@ -117,92 +114,105 @@ fi
 
 # Set Ingress Rule if not exists
 if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissions[?FromPort==`80` && ToPort==`80` && IpProtocol==`tcp`]' --output text | grep -q '0.0.0.0/0'; then
-  aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 80 --cidr 0.0.0.0/0
-  check_error "Failed to set ingress rule for port 80"
-fi
-if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissions[?FromPort==`81` && ToPort==`81` && IpProtocol==`tcp`]' --output text | grep -q '0.0.0.0/0'; then
-  aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 81 --cidr 0.0.0.0/0
-  check_error "Failed to set ingress rule for port 81"
+  aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT_NGINX --cidr 0.0.0.0/0
+  check_error "Failed to set security group ingress rules"
+  aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT_NPM --cidr 0.0.0.0/0
+  check_error "Failed to set security group ingress rules"
+else
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Ingress rule already exists."
 fi
 
 # Set Egress Rule if not exists
 if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissionsEgress[?IpProtocol==`-1` && IpRanges[?CidrIp==`0.0.0.0/0`]]' --output text | grep -q '0.0.0.0/0'; then
   aws ec2 authorize-security-group-egress --group-id $SG_ID --protocol -1 --cidr 0.0.0.0/0
-  check_error "Failed to set egress rules"
+  check_error "Failed to set security group egress rules"
 else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Egress rule already exists."
 fi
 
 # Create Load Balancer
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Load Balancer..."
 ALB_ARN=$(aws elbv2 create-load-balancer --name $ALB_NAME --subnets $SUBNET_ID1 $SUBNET_ID2 --security-groups $SG_ID --query 'LoadBalancers[0].LoadBalancerArn' --output text)
 check_error "Failed to create Load Balancer"
 sleep 30  # Allow time for ALB to become available
 
-# Create Target Groups
-TG_ARN=$(aws elbv2 create-target-group --name $TG_NAME --protocol HTTP --port $PORT --vpc-id $VPC_ID --query 'TargetGroups[0].TargetGroupArn' --output text)
+# Create Target Group for NGINX
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Target Group for NGINX..."
+TG_ARN_NGINX=$(aws elbv2 create-target-group --name $TG_NAME_NGINX --protocol HTTP --port $PORT_NGINX --vpc-id $VPC_ID --query 'TargetGroups[0].TargetGroupArn' --output text)
 check_error "Failed to create Target Group for NGINX"
 
-PROXY_TG_ARN=$(aws elbv2 create-target-group --name $PROXY_TG_NAME --protocol HTTP --port $PROXY_PORT --vpc-id $VPC_ID --query 'TargetGroups[0].TargetGroupArn' --output text)
-check_error "Failed to create Target Group for NGINX Proxy Manager"
+# Create Target Group for Nginx Proxy Manager
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Target Group for Nginx Proxy Manager..."
+TG_ARN_NPM=$(aws elbv2 create-target-group --name $TG_NAME_NPM --protocol HTTP --port $PORT_NPM --vpc-id $VPC_ID --query 'TargetGroups[0].TargetGroupArn' --output text)
+check_error "Failed to create Target Group for Nginx Proxy Manager"
 
-# Create Listeners
-aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT --default-actions Type=forward,TargetGroupArn=$TG_ARN
-check_error "Failed to create listener for NGINX"
+# Create Listener for NGINX
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Listener for NGINX..."
+aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT_NGINX --default-actions Type=forward,TargetGroupArn=$TG_ARN_NGINX
+check_error "Failed to create Listener for NGINX"
 
-aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PROXY_PORT --default-actions Type=forward,TargetGroupArn=$PROXY_TG_ARN
-check_error "Failed to create listener for NGINX Proxy Manager"
+# Create Listener for Nginx Proxy Manager
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Listener for Nginx Proxy Manager..."
+aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT_NPM --default-actions Type=forward,TargetGroupArn=$TG_ARN_NPM
+check_error "Failed to create Listener for Nginx Proxy Manager"
 
 # Create ECS Task Execution Role
-if ! aws iam get-role --role-name $EXECUTION_ROLE_NAME &>/dev/null; then
-  TRUST_POLICY='{
-    "Version": "2012-10-17",
-    "Statement": [
-      {
-        "Effect": "Allow",
-        "Principal": {
-          "Service": "ecs-tasks.amazonaws.com"
-        },
-        "Action": "sts:AssumeRole"
-      }
-    ]
-  }'
-  aws iam create-role --role-name $EXECUTION_ROLE_NAME --assume-role-policy-document "$TRUST_POLICY"
-  check_error "Failed to create ECS Task Execution Role"
-  aws iam attach-role-policy --role-name $EXECUTION_ROLE_NAME --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-  check_error "Failed to attach policy to ECS Task Execution Role"
-fi
+TRUST_POLICY='{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}'
+aws iam create-role --role-name $EXECUTION_ROLE_NAME --assume-role-policy-document "$TRUST_POLICY"
+check_error "Failed to create ECS Task Execution Role"
 
-# Register ECS Task Definitions
-aws ecs register-task-definition --family $TASK_FAMILY \
+# Attach AmazonECSTaskExecutionRolePolicy to the execution role
+aws iam attach-role-policy --role-name $EXECUTION_ROLE_NAME --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+check_error "Failed to attach policy to ECS Task Execution Role"
+
+# Register ECS Task Definition for NGINX
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Registering ECS Task Definition for NGINX..."
+aws ecs register-task-definition --family $TASK_FAMILY_NGINX \
   --network-mode awsvpc \
   --requires-compatibilities FARGATE \
   --cpu "256" --memory "512" \
   --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$EXECUTION_ROLE_NAME \
-  --container-definitions '[{"name":"'$CONTAINER_NAME'","image":"'$IMAGE_URI'","portMappings":[{"containerPort":'$PORT'}]}]'
+  --container-definitions '[{"name":"'$CONTAINER_NAME_NGINX'","image":"'$IMAGE_URI_NGINX'","portMappings":[{"containerPort":'$PORT_NGINX'}]}]'
 check_error "Failed to register ECS Task Definition for NGINX"
 
-aws ecs register-task-definition --family $PROXY_TASK_FAMILY \
+# Register ECS Task Definition for Nginx Proxy Manager
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Registering ECS Task Definition for Nginx Proxy Manager..."
+aws ecs register-task-definition --family $TASK_FAMILY_NPM \
   --network-mode awsvpc \
   --requires-compatibilities FARGATE \
   --cpu "256" --memory "512" \
   --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$EXECUTION_ROLE_NAME \
-  --container-definitions '[{"name":"'$PROXY_CONTAINER_NAME'","image":"'$PROXY_IMAGE_URI'","portMappings":[{"containerPort":'$PROXY_PORT'}]}]'
-check_error "Failed to register ECS Task Definition for NGINX Proxy Manager"
+  --container-definitions '[{"name":"'$CONTAINER_NAME_NPM'","image":"'$IMAGE_URI_NPM'","portMappings":[{"containerPort":'$PORT_NPM'}]}]'
+check_error "Failed to register ECS Task Definition for Nginx Proxy Manager"
 
-# Create ECS Services
-aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME \
-  --task-definition $TASK_FAMILY --desired-count 1 \
+# Create ECS Service for NGINX
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for NGINX..."
+aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NGINX \
+  --task-definition $TASK_FAMILY_NGINX --desired-count 1 \
   --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
-  --load-balancers "targetGroupArn=$TG_ARN,containerName=$CONTAINER_NAME,containerPort=$PORT"
+  --load-balancers "targetGroupArn=$TG_ARN_NGINX,containerName=$CONTAINER_NAME_NGINX,containerPort=$PORT_NGINX"
 check_error "Failed to create ECS Service for NGINX"
 
-aws ecs create-service --cluster $CLUSTER_NAME --service-name $PROXY_SERVICE_NAME \
-  --task-definition $PROXY_TASK_FAMILY --desired-count 1 \
+# Create ECS Service for Nginx Proxy Manager
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for Nginx Proxy Manager..."
+aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NPM \
+  --task-definition $TASK_FAMILY_NPM --desired-count 1 \
   --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
-  --load-balancers "targetGroupArn=$PROXY_TG_ARN,containerName=$PROXY_CONTAINER_NAME,containerPort=$PROXY_PORT"
-check_error "Failed to create ECS Service for NGINX Proxy Manager"
+  --load-balancers "targetGroupArn=$TG_ARN_NPM,containerName=$CONTAINER_NAME_NPM,containerPort=$PORT_NPM"
+check_error "Failed to create ECS Service for Nginx Proxy Manager"
 
 # Output Load Balancer DNS
 ALB_DNS=$(aws elbv2 describe-load-balancers --load-balancer-arns $ALB_ARN --query 'LoadBalancers[0].DNSName' --output text)
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment successful! Access your NGINX application at http://$ALB_DNS"
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Access your NGINX Proxy Manager at http://$ALB_DNS:$PROXY_PORT"
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment successful! Access your Nginx Proxy Manager application at http://$ALB_DNS:$PORT_NPM"
