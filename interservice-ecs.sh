@@ -32,8 +32,8 @@ fi
 # Add inbound and outbound rules
 echo "Configuring Security Group rules..."
 if [ -n "$SECURITY_GROUP_ID" ]; then
-  aws ec2 authorize-security-group-ingress --group-id $SECURITY_GROUP_ID --protocol tcp --port 0-65535 --cidr 0.0.0.0/0 || true
-  aws ec2 authorize-security-group-egress --group-id $SECURITY_GROUP_ID --protocol -1 --port all --cidr 0.0.0.0/0 || true
+  aws ec2 authorize-security-group-ingress --group-id $SECURITY_GROUP_ID --protocol tcp --port 0-65535 --cidr 0.0.0.0/0 || echo "Ingress rule already exists."
+  aws ec2 authorize-security-group-egress --group-id $SECURITY_GROUP_ID --protocol -1 --cidr 0.0.0.0/0 || echo "Egress rule already exists."
 else
   echo "Security Group ID not found. Exiting."
   exit 1
@@ -59,7 +59,6 @@ aws ecs register-task-definition --cli-input-json '{
       "portMappings": [
         {
           "containerPort": 80,
-          "hostPort": 80,
           "protocol": "tcp"
         }
       ],
@@ -83,7 +82,6 @@ aws ecs register-task-definition --cli-input-json '{
       "portMappings": [
         {
           "containerPort": 8080,
-          "hostPort": 8080,
           "protocol": "tcp"
         }
       ],
@@ -107,11 +105,14 @@ ALB_ARN=$(aws elbv2 create-load-balancer \
   --scheme internet-facing \
   --query 'LoadBalancers[0].LoadBalancerArn' --output text)
 
+# Create Target Groups
+NGINX_TG_ARN=$(aws elbv2 create-target-group --name nginx-tg --protocol HTTP --port 80 --vpc-id $VPC_ID --query 'TargetGroups[0].TargetGroupArn' --output text)
+NGINX_MANAGER_TG_ARN=$(aws elbv2 create-target-group --name nginx-manager-tg --protocol HTTP --port 8080 --vpc-id $VPC_ID --query 'TargetGroups[0].TargetGroupArn' --output text)
+
 # Create Listeners
 echo "Creating Listeners..."
-aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port 80 --default-actions Type=forward,TargetGroupArn=$(aws elbv2 create-target-group --name nginx-tg --protocol HTTP --port 80 --vpc-id $VPC_ID --query 'TargetGroups[0].TargetGroupArn' --output text)
-
-aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port 8080 --default-actions Type=forward,TargetGroupArn=$(aws elbv2 create-target-group --name nginx-manager-tg --protocol HTTP --port 8080 --vpc-id $VPC_ID --query 'TargetGroups[0].TargetGroupArn' --output text)
+aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port 80 --default-actions Type=forward,TargetGroupArn=$NGINX_TG_ARN
+aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port 8080 --default-actions Type=forward,TargetGroupArn=$NGINX_MANAGER_TG_ARN
 
 # Create ECS Services
 echo "Creating Nginx Service..."
