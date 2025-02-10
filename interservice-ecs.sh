@@ -19,7 +19,7 @@ SUBNET_CIDR2="10.0.2.0/24"
 ALB_NAME="nginx-alb"
 TG_NAME_NGINX="nginx-tg"
 TG_NAME_NPM="nginx-proxy-manager-tg"
-SG_NAME="nginx-sg-new"
+SG_NAME="nginx-sg"
 EXECUTION_ROLE_NAME="ecsTaskExecutionRole"
 TASK_ROLE_NAME="ecsTaskRole"
 
@@ -122,7 +122,7 @@ else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Ingress rules already exist."
 fi
 
-# Set Egress Rule if not exists
+# # Set Egress Rule if not exists
 # EXISTING_EGRESS_RULE=$(aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissionsEgress[?IpProtocol==`-1` && IpRanges[?CidrIp==`0.0.0.0/0`]]' --output text)
 # if [ -z "$EXISTING_EGRESS_RULE" ]; then
 #   echo "$(date '+%Y-%m-%d %H:%M:%S') - Adding egress rule to Security Group..."
@@ -202,7 +202,8 @@ check_error "Failed to create ECS Service for NGINX"
 aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NPM --task-definition $TASK_FAMILY_NPM --desired-count 1 --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" --load-balancers "targetGroupArn=$TG_ARN_NPM,containerName=$CONTAINER_NAME_NPM,containerPort=$PORT_NPM"
 check_error "Failed to create ECS Service for Nginx Proxy Manager"
 
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment complete."
+# Output ALB DNS Name
 ALB_DNS=$(aws elbv2 describe-load-balancers --names $ALB_NAME --query 'LoadBalancers[0].DNSName' --output text)
-echo "Access NGINX at http://$ALB_DNS"
-echo "Access Nginx Proxy Manager at http://$ALB_DNS:$PORT_NPM"
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment complete. Access your services at:"
+echo "NGINX: http://$ALB_DNS:$PORT_NGINX"
+echo "Nginx Proxy Manager: http://$ALB_DNS:$PORT_NPM"
