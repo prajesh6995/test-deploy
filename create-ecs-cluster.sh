@@ -162,15 +162,29 @@ if [ "$LISTENER_ARN" == "None" ] || [ -z "$LISTENER_ARN" ]; then
   check_error "Failed to create Listener"
 fi
 
-# Create IAM Roles for ECS Task
-EXECUTION_ROLE_ARN=$(aws iam get-role --role-name $EXECUTION_ROLE_NAME --query 'Role.Arn' --output text 2>/dev/null)
-if [ "$EXECUTION_ROLE_ARN" == "None" ] || [ -z "$EXECUTION_ROLE_ARN" ]; then
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating IAM Execution Role..."
-  EXECUTION_ROLE_ARN=$(aws iam create-role --role-name $EXECUTION_ROLE_NAME --assume-role-policy-document file://ecs-trust-policy.json --query 'Role.Arn' --output text)
-  aws iam attach-role-policy --role-name $EXECUTION_ROLE_NAME --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-  check_error "Failed to create Execution Role"
+# Check and Create IAM Role for ECS Task Execution
+TASK_ROLE_NAME="ecsTaskExecutionRole"
+ROLE_EXISTS=$(aws iam get-role --role-name $ROLE_NAME --query 'Role.RoleName' --output text 2>/dev/null)
+if [ "$ROLE_EXISTS" != "$ROLE_NAME" ]; then
+  echo "Creating IAM Role for ECS Task Execution..."
+  TRUST_POLICY='{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Principal": {
+          "Service": "ecs-tasks.amazonaws.com"
+        },
+        "Action": "sts:AssumeRole"
+      }
+    ]
+  }'
+  aws iam create-role --role-name $TASK_ROLE_NAME --assume-role-policy-document "$TRUST_POLICY"
+  aws iam attach-role-policy --role-name $TASK_ROLE_NAME --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+  echo "IAM Role '$ROLE_NAME' created and policy attached."
+else
+  echo "IAM Role '$ROLE_NAME' already exists."
 fi
-get_arn_or_exit "Execution Role" "$EXECUTION_ROLE_ARN"
 
 TASK_ROLE_ARN=$(aws iam get-role --role-name $TASK_ROLE_NAME --query 'Role.Arn' --output text 2>/dev/null)
 if [ "$TASK_ROLE_ARN" == "None" ] || [ -z "$TASK_ROLE_ARN" ]; then
