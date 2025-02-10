@@ -38,7 +38,8 @@ AZ1=${AVAILABLE_AZS[0]}
 AZ2=${AVAILABLE_AZS[1]}
 
 # Create ECS Cluster
-if ! aws ecs describe-clusters --clusters $CLUSTER_NAME --query 'clusters[0].status' --output text | grep -q 'ACTIVE'; then
+EXISTING_CLUSTER=$(aws ecs describe-clusters --clusters $CLUSTER_NAME --query 'clusters[?status==`ACTIVE`].clusterName' --output text)
+if [ "$EXISTING_CLUSTER" != "$CLUSTER_NAME" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Cluster..."
   aws ecs create-cluster --cluster-name $CLUSTER_NAME
   check_error "Failed to create ECS Cluster"
@@ -47,12 +48,12 @@ else
 fi
 
 # Create VPC
-if ! aws ec2 describe-vpcs --filters "Name=cidr-block,Values=$VPC_CIDR" --query 'Vpcs[0].VpcId' --output text | grep -q 'vpc-'; then
+VPC_ID=$(aws ec2 describe-vpcs --filters "Name=cidr-block,Values=$VPC_CIDR" --query 'Vpcs[?State==`available`].VpcId' --output text)
+if [ -z "$VPC_ID" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating VPC..."
   VPC_ID=$(aws ec2 create-vpc --cidr-block $VPC_CIDR --query 'Vpc.VpcId' --output text)
   check_error "Failed to create VPC"
 else
-  VPC_ID=$(aws ec2 describe-vpcs --filters "Name=cidr-block,Values=$VPC_CIDR" --query 'Vpcs[0].VpcId' --output text)
   echo "$(date '+%Y-%m-%d %H:%M:%S') - VPC already exists with ID $VPC_ID."
 fi
 
@@ -61,13 +62,13 @@ aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-support '{"Value":tru
 aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-hostnames '{"Value":true}'
 
 # Create and attach Internet Gateway
-if ! aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$VPC_ID" --query 'InternetGateways[0].InternetGatewayId' --output text | grep -q 'igw-'; then
+IGW_ID=$(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$VPC_ID" --query 'InternetGateways[0].InternetGatewayId' --output text)
+if [ -z "$IGW_ID" ]; then
   IGW_ID=$(aws ec2 create-internet-gateway --query 'InternetGateway.InternetGatewayId' --output text)
   check_error "Failed to create Internet Gateway"
   aws ec2 attach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID
   check_error "Failed to attach Internet Gateway"
 else
-  IGW_ID=$(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$VPC_ID" --query 'InternetGateways[0].InternetGatewayId' --output text)
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Internet Gateway already attached with ID $IGW_ID."
 fi
 
@@ -81,7 +82,7 @@ else
 fi
 
 # Create Subnets in Different AZs
-SUBNET_ID1=$(aws ec2 describe-subnets --filters "Name=cidr-block,Values=$SUBNET_CIDR1" --query 'Subnets[0].SubnetId' --output text)
+SUBNET_ID1=$(aws ec2 describe-subnets --filters "Name=cidr-block,Values=$SUBNET_CIDR1" "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[0].SubnetId' --output text)
 if [ -z "$SUBNET_ID1" ]; then
   SUBNET_ID1=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block $SUBNET_CIDR1 --availability-zone $AZ1 --query 'Subnet.SubnetId' --output text)
   check_error "Failed to create Subnet 1"
@@ -89,7 +90,7 @@ if [ -z "$SUBNET_ID1" ]; then
   aws ec2 modify-subnet-attribute --subnet-id $SUBNET_ID1 --map-public-ip-on-launch
 fi
 
-SUBNET_ID2=$(aws ec2 describe-subnets --filters "Name=cidr-block,Values=$SUBNET_CIDR2" --query 'Subnets[0].SubnetId' --output text)
+SUBNET_ID2=$(aws ec2 describe-subnets --filters "Name=cidr-block,Values=$SUBNET_CIDR2" "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[0].SubnetId' --output text)
 if [ -z "$SUBNET_ID2" ]; then
   SUBNET_ID2=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block $SUBNET_CIDR2 --availability-zone $AZ2 --query 'Subnet.SubnetId' --output text)
   check_error "Failed to create Subnet 2"
@@ -108,11 +109,14 @@ fi
 if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissions[?FromPort==`80` && ToPort==`80` && IpProtocol==`tcp`]' --output text | grep -q '0.0.0.0/0'; then
   aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT --cidr 0.0.0.0/0
   check_error "Failed to set security group ingress rules"
+else
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Ingress rule already exists."
 fi
 
 if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissionsEgress[?IpProtocol==`-1` && IpRanges[?CidrIp==`0.0.0.0/0`]]' --output text | grep -q '0.0.0.0/0'; then
-  aws ec2 authorize-security-group-egress --group-id $SG_ID --protocol -1 --cidr 0.0.0.0/0
-  check_error "Failed to set security group egress rules"
+  aws ec2 authorize-security-group-egress --group-id $SG_ID --protocol -1 --cidr 0.0.0.0/0 || echo "Egress rule already exists, skipping."
+else
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Egress rule already exists."
 fi
 
 # Create Load Balancer for Reverse Proxy
