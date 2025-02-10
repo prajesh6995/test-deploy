@@ -187,22 +187,56 @@ check_error "Failed to attach policy to ECS Task Execution Role"
 
 # Register ECS Task Definition for NGINX
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Registering ECS Task Definition for NGINX..."
-aws ecs register-task-definition --family $TASK_FAMILY_NGINX \
+NGINX_TASK_DEFINITION=$(cat <<EOF
+[
+    {
+        "name": "$CONTAINER_NAME_NGINX",
+        "image": "$IMAGE_URI_NGINX",
+        "portMappings": [
+            {
+                "containerPort": $PORT_NGINX
+            }
+        ]
+    }
+]
+EOF
+)
+
+aws ecs register-task-definition \
+  --family $TASK_FAMILY_NGINX \
   --network-mode awsvpc \
   --requires-compatibilities FARGATE \
-  --cpu "256" --memory "512" \
+  --cpu "256" \
+  --memory "512" \
   --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$EXECUTION_ROLE_NAME \
-  --container-definitions '[{"name":"'$CONTAINER_NAME_NGINX'","image":"'$IMAGE_URI_NGINX'","portMappings":[{"containerPort":'$PORT_NGINX'}]}]'
+  --container-definitions "$NGINX_TASK_DEFINITION"
 check_error "Failed to register ECS Task Definition for NGINX"
 
 # Register ECS Task Definition for Nginx Proxy Manager
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Registering ECS Task Definition for Nginx Proxy Manager..."
-aws ecs register-task-definition --family $TASK_FAMILY_NPM \
+NPM_TASK_DEFINITION=$(cat <<EOF
+[
+    {
+        "name": "$CONTAINER_NAME_NPM",
+        "image": "$IMAGE_URI_NPM",
+        "portMappings": [
+            {
+                "containerPort": $PORT_NPM
+            }
+        ]
+    }
+]
+EOF
+)
+
+aws ecs register-task-definition \
+  --family $TASK_FAMILY_NPM \
   --network-mode awsvpc \
   --requires-compatibilities FARGATE \
-  --cpu "256" --memory "512" \
+  --cpu "256" \
+  --memory "512" \
   --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$EXECUTION_ROLE_NAME \
-  --container-definitions '[{"name":"'$CONTAINER_NAME_NPM'","image":"'$IMAGE_URI_NPM'","portMappings":[{"containerPort":'$PORT_NPM'}]}]'
+  --container-definitions "$NPM_TASK_DEFINITION"
 check_error "Failed to register ECS Task Definition for Nginx Proxy Manager"
 
 # Check if NGINX Service exists
