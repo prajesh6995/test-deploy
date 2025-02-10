@@ -205,6 +205,9 @@ aws ecs register-task-definition --family $TASK_FAMILY \
   --network-mode awsvpc \
   --execution-role-arn "$EXECUTION_ROLE_ARN" \
   --task-role-arn "$TASK_ROLE_ARN" \
+  --requires-compatibilities FARGATE \
+  --cpu "256" \
+  --memory "512" \
   --container-definitions "[
     {
       \"name\": \"$CONTAINER_NAME\",
