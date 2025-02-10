@@ -29,14 +29,22 @@ else
   echo "Security Group already exists with ID: $SECURITY_GROUP_ID"
 fi
 
-# Add inbound and outbound rules
-echo "Configuring Security Group rules..."
-if [ -n "$SECURITY_GROUP_ID" ]; then
-  aws ec2 authorize-security-group-ingress --group-id $SECURITY_GROUP_ID --protocol tcp --port 0-65535 --cidr 0.0.0.0/0 || echo "Ingress rule already exists."
-  aws ec2 authorize-security-group-egress --group-id $SECURITY_GROUP_ID --protocol -1 --cidr 0.0.0.0/0 || echo "Egress rule already exists."
+# Check and add inbound rule if it doesn't exist
+ingress_exists=$(aws ec2 describe-security-groups --group-ids $SECURITY_GROUP_ID --query "SecurityGroups[0].IpPermissions[?IpProtocol=='tcp' && FromPort==\`0\` && ToPort==\`65535\` && IpRanges[?CidrIp=='0.0.0.0/0']].IpProtocol" --output text)
+if [ -z "$ingress_exists" ]; then
+  echo "Adding Ingress rule..."
+  aws ec2 authorize-security-group-ingress --group-id $SECURITY_GROUP_ID --protocol tcp --port 0-65535 --cidr 0.0.0.0/0
 else
-  echo "Security Group ID not found. Exiting."
-  exit 1
+  echo "Ingress rule already exists."
+fi
+
+# Check and add outbound rule if it doesn't exist
+egress_exists=$(aws ec2 describe-security-groups --group-ids $SECURITY_GROUP_ID --query "SecurityGroups[0].IpPermissionsEgress[?IpProtocol=='-1' && IpRanges[?CidrIp=='0.0.0.0/0']].IpProtocol" --output text)
+if [ -z "$egress_exists" ]; then
+  echo "Adding Egress rule..."
+  aws ec2 authorize-security-group-egress --group-id $SECURITY_GROUP_ID --protocol -1 --cidr 0.0.0.0/0
+else
+  echo "Egress rule already exists."
 fi
 
 # Get subnets in the same VPC
