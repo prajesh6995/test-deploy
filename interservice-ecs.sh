@@ -124,7 +124,12 @@ fi
 
 # Set Egress Rule if not exists
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Checking if egress rule already exists..."
-EXISTING_EGRESS_RULE=$(aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissionsEgress[?IpProtocol==`-1` && IpRanges[?CidrIp==`0.0.0.0/0`]]' --output text)
+
+# Check if the egress rule already exists
+EXISTING_EGRESS_RULE=$(aws ec2 describe-security-groups \
+  --group-ids $SG_ID \
+  --query 'SecurityGroups[0].IpPermissionsEgress[?IpProtocol==`-1` && length(IpRanges[?CidrIp==`0.0.0.0/0`]) > `0`]' \
+  --output text)
 
 if [ -z "$EXISTING_EGRESS_RULE" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Adding egress rule to Security Group..."
