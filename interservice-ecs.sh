@@ -129,6 +129,8 @@ fi
 if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissionsEgress[?IpProtocol==`-1` && IpRanges[?CidrIp==`0.0.0.0/0`]]' --output text | grep -q '0.0.0.0/0'; then
   aws ec2 authorize-security-group-egress --group-id $SG_ID --protocol -1 --cidr 0.0.0.0/0
   check_error "Failed to set egress rules"
+else
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Egress rule already exists."
 fi
 
 # Create Load Balancer
