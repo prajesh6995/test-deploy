@@ -194,34 +194,44 @@ if [ "$TASK_ROLE_ARN" == "None" ] || [ -z "$TASK_ROLE_ARN" ]; then
 fi
 get_arn_or_exit "Task Role" "$TASK_ROLE_ARN"
 
-# ECS Cluster Creation
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Cluster..."
-aws ecs create-cluster --cluster-name $CLUSTER_NAME
-check_error "Failed to create ECS Cluster"
+# Check and Create ECS Cluster
+echo "Checking for existing ECS Cluster..."
+CLUSTER_EXISTS=$(aws ecs describe-clusters --clusters $CLUSTER_NAME --query "clusters[0].status" --output text 2>/dev/null)
+if [ "$CLUSTER_EXISTS" != "ACTIVE" ]; then
+  echo "Creating ECS Cluster..."
+  aws ecs create-cluster --cluster-name $CLUSTER_NAME --region $REGION
+  echo "ECS Cluster '$CLUSTER_NAME' created successfully."
+else
+  echo "ECS Cluster '$CLUSTER_NAME' already exists."
+fi
 
-# Task Definition Registration
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Registering Task Definition..."
-aws ecs register-task-definition --family $TASK_FAMILY \
-  --network-mode awsvpc \
-  --execution-role-arn "$EXECUTION_ROLE_ARN" \
-  --task-role-arn "$TASK_ROLE_ARN" \
-  --requires-compatibilities FARGATE \
-  --cpu "256" \
-  --memory "512" \
-  --container-definitions "[
-    {
-      \"name\": \"$CONTAINER_NAME\",
-      \"image\": \"$IMAGE_URI\",
-      \"essential\": true,
-      \"portMappings\": [
-        {
-          \"containerPort\": $PORT,
-          \"protocol\": \"tcp\"
-        }
-      ]
-    }
-  ]"
-check_error "Failed to register Task Definition"
+# Check and Register Task Definition
+TASK_DEF_EXISTS=$(aws ecs list-task-definitions --family-prefix $TASK_FAMILY --query "taskDefinitionArns[-1]" --output text)
+if [ "$TASK_DEF_EXISTS" == "None" ]; then
+  echo "Registering Task Definition..."
+  TASK_DEF_ARN=$(aws ecs register-task-definition \
+    --family $TASK_FAMILY \
+    --network-mode awsvpc \
+    --requires-compatibilities FARGATE \
+    --cpu "256" \
+    --memory "512" \
+    --execution-role-arn $ROLE_ARN \
+    --container-definitions '[{
+      "name": "'$CONTAINER_NAME'",
+      "image": "'$IMAGE_URI'",
+      "portMappings": [{
+        "containerPort": '$PORT',
+        "hostPort": '$PORT',
+        "protocol": "tcp"
+      }],
+      "essential": true
+    }]' \
+    --query "taskDefinition.taskDefinitionArn" --output text)
+  echo "Task Definition registered: $TASK_DEF_ARN"
+else
+  echo "Task Definition already exists: $TASK_DEF_EXISTS"
+  TASK_DEF_ARN=$TASK_DEF_EXISTS
+fi
 
 # ECS Service Creation
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service..."
