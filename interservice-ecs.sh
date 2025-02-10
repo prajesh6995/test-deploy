@@ -131,25 +131,35 @@ else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Egress rule already exists."
 fi
 
-# Create ECS Task Execution Role
-TRUST_POLICY='{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "ecs-tasks.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}'
-aws iam create-role --role-name $EXECUTION_ROLE_NAME --assume-role-policy-document "$TRUST_POLICY"
-check_error "Failed to create ECS Task Execution Role"
+# Create ECS Task Execution Role if it doesn't exist
+ROLE_EXISTS=$(aws iam get-role --role-name $EXECUTION_ROLE_NAME --query 'Role.RoleName' --output text 2>/dev/null)
+if [ "$ROLE_EXISTS" != "$EXECUTION_ROLE_NAME" ]; then
+  TRUST_POLICY='{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Principal": {
+          "Service": "ecs-tasks.amazonaws.com"
+        },
+        "Action": "sts:AssumeRole"
+      }
+    ]
+  }'
+  aws iam create-role --role-name $EXECUTION_ROLE_NAME --assume-role-policy-document "$TRUST_POLICY"
+  check_error "Failed to create ECS Task Execution Role"
+else
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - ECS Task Execution Role already exists."
+fi
 
-# Attach AmazonECSTaskExecutionRolePolicy to the execution role
-aws iam attach-role-policy --role-name $EXECUTION_ROLE_NAME --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-check_error "Failed to attach policy to ECS Task Execution Role"
+# Attach policy if not already attached
+POLICY_ATTACHED=$(aws iam list-attached-role-policies --role-name $EXECUTION_ROLE_NAME --query 'AttachedPolicies[?PolicyArn==`arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy`]' --output text)
+if [ -z "$POLICY_ATTACHED" ]; then
+  aws iam attach-role-policy --role-name $EXECUTION_ROLE_NAME --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+  check_error "Failed to attach policy to ECS Task Execution Role"
+else
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Policy already attached to ECS Task Execution Role."
+fi
 
 # Register ECS Task Definitions
 register_task() {
@@ -175,8 +185,6 @@ register_task $NPM_TASK_FAMILY $NPM_CONTAINER_NAME $NPM_IMAGE_URI $NPM_PORT
 create_service() {
   local SERVICE_NAME=$1
   local TASK_FAMILY=$2
-  local CONTAINER_NAME=$3
-  local PORT=$4
 
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for $SERVICE_NAME..."
   aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME \
@@ -185,8 +193,8 @@ create_service() {
   check_error "Failed to create ECS Service for $SERVICE_NAME"
 }
 
-create_service $NGINX_SERVICE_NAME $NGINX_TASK_FAMILY $NGINX_CONTAINER_NAME $NGINX_PORT
-create_service $NPM_SERVICE_NAME $NPM_TASK_FAMILY $NPM_CONTAINER_NAME $NPM_PORT
+create_service $NGINX_SERVICE_NAME $NGINX_TASK_FAMILY
+create_service $NPM_SERVICE_NAME $NPM_TASK_FAMILY
 
 # Output success message
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment successful! Access your NGINX application at http://<your-alb-dns>:80 and NGINX Proxy Manager at http://<your-alb-dns>:81"
