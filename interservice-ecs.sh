@@ -202,4 +202,15 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for NGINX..."
 aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NGINX \
   --task-definition $TASK_FAMILY_NGINX --desired-count 1 \
   --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
-  --load-balancers "targetGroupArn=$TG_ARN_NGINX,containerName=$
+  --load-balancers "targetGroupArn=$TG_ARN_NGINX,containerName=$CONTAINER_NAME_NGINX,containerPort=$PORT_NGINX"
+check_error "Failed to create ECS Service for NGINX"
+
+# Create ECS Service for Nginx Proxy Manager
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for Nginx Proxy Manager..."
+aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NPM \
+  --task-definition $TASK_FAMILY_NPM --desired-count 1 \
+  --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
+  --load-balancers "targetGroupArn=$TG_ARN_NPM,containerName=$CONTAINER_NAME_NPM,containerPort=$PORT_NPM"
+check_error "Failed to create ECS Service for Nginx Proxy Manager"
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Script completed successfully."
