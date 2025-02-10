@@ -143,7 +143,7 @@ fi
 # Create Target Groups
 TG_ARN_NGINX=$(aws elbv2 describe-target-groups --names $TG_NAME_NGINX --query 'TargetGroups[0].TargetGroupArn' --output text)
 if [ "$TG_ARN_NGINX" == "None" ]; then
-  TG_ARN_NGINX=$(aws elbv2 create-target-group --name $TG_NAME_NGINX --protocol HTTP --port $PORT_NGINX --vpc-id $VPC_ID --query 'TargetGroups[0].TargetGroupArn' --output text)
+  TG_ARN_NGINX=$(aws elbv2 create-target-group --name $TG_NAME_NGINX --protocol HTTP --port $PORT_NGINX --vpc-id $VPC_ID --target-type ip --query 'TargetGroups[0].TargetGroupArn' --output text)
   check_error "Failed to create Target Group for NGINX"
 else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Target Group for NGINX already exists with ARN $TG_ARN_NGINX."
@@ -151,7 +151,7 @@ fi
 
 TG_ARN_NPM=$(aws elbv2 describe-target-groups --names $TG_NAME_NPM --query 'TargetGroups[0].TargetGroupArn' --output text)
 if [ "$TG_ARN_NPM" == "None" ]; then
-  TG_ARN_NPM=$(aws elbv2 create-target-group --name $TG_NAME_NPM --protocol HTTP --port $PORT_NPM --vpc-id $VPC_ID --query 'TargetGroups[0].TargetGroupArn' --output text)
+  TG_ARN_NPM=$(aws elbv2 create-target-group --name $TG_NAME_NPM --protocol HTTP --port $PORT_NPM --vpc-id $VPC_ID --target-type ip --query 'TargetGroups[0].TargetGroupArn' --output text)
   check_error "Failed to create Target Group for Nginx Proxy Manager"
 else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Target Group for Nginx Proxy Manager already exists with ARN $TG_ARN_NPM."
@@ -176,7 +176,7 @@ fi
 ROLE_ARN=$(aws iam get-role --role-name $EXECUTION_ROLE_NAME --query 'Role.Arn' --output text)
 if [ "$ROLE_ARN" == "None" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Task Execution Role..."
-  aws iam create-role --role-name $EXECUTION_ROLE_NAME --assume-role-policy-document "$TRUST_POLICY"
+  aws iam create-role --role-name $EXECUTION_ROLE_NAME --assume-role-policy-document "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Principal\": {\"Service\": \"ecs-tasks.amazonaws.com\"}, \"Action\": \"sts:AssumeRole\"}]}"
   check_error "Failed to create ECS Task Execution Role"
   aws iam attach-role-policy --role-name $EXECUTION_ROLE_NAME --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
   check_error "Failed to attach policy to ECS Task Execution Role"
@@ -185,10 +185,10 @@ else
 fi
 
 # Register ECS Task Definitions for NGINX and NPM
-aws ecs register-task-definition --family $TASK_FAMILY_NGINX --network-mode awsvpc --requires-compatibilities FARGATE --cpu "256" --memory "512" --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$EXECUTION_ROLE_NAME --container-definitions '[{"name":"'$CONTAINER_NAME_NGINX'","image":"'$IMAGE_URI_NGINX'","portMappings":[{"containerPort":'$PORT_NGINX'}]}]'
+aws ecs register-task-definition --family $TASK_FAMILY_NGINX --network-mode awsvpc --requires-compatibilities FARGATE --cpu "256" --memory "512" --execution-role-arn $ROLE_ARN --container-definitions '[{"name":"'$CONTAINER_NAME_NGINX'","image":"'$IMAGE_URI_NGINX'","portMappings":[{"containerPort":'$PORT_NGINX'}]}]'
 check_error "Failed to register ECS Task Definition for NGINX"
 
-aws ecs register-task-definition --family $TASK_FAMILY_NPM --network-mode awsvpc --requires-compatibilities FARGATE --cpu "256" --memory "512" --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$EXECUTION_ROLE_NAME --container-definitions '[{"name":"'$CONTAINER_NAME_NPM'","image":"'$IMAGE_URI_NPM'","portMappings":[{"containerPort":'$PORT_NPM'}]}]'
+aws ecs register-task-definition --family $TASK_FAMILY_NPM --network-mode awsvpc --requires-compatibilities FARGATE --cpu "256" --memory "512" --execution-role-arn $ROLE_ARN --container-definitions '[{"name":"'$CONTAINER_NAME_NPM'","image":"'$IMAGE_URI_NPM'","portMappings":[{"containerPort":'$PORT_NPM'}]}]'
 check_error "Failed to register ECS Task Definition for Nginx Proxy Manager"
 
 # Create ECS Services for NGINX and NPM
