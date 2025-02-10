@@ -123,14 +123,7 @@ else
 fi
 
 # Set Egress Rule if not exists
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Checking if egress rule already exists..."
-
-# Check if the egress rule already exists
-EXISTING_EGRESS_RULE=$(aws ec2 describe-security-groups \
-  --group-ids $SG_ID \
-  --query 'SecurityGroups[0].IpPermissionsEgress[?IpProtocol==`-1` && length(IpRanges[?CidrIp==`0.0.0.0/0`]) > `0`]' \
-  --output text)
-
+EXISTING_EGRESS_RULE=$(aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissionsEgress[?IpProtocol==`-1` && IpRanges[?CidrIp==`0.0.0.0/0`]]' --output text)
 if [ -z "$EXISTING_EGRESS_RULE" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Adding egress rule to Security Group..."
   aws ec2 authorize-security-group-egress --group-id $SG_ID --protocol -1 --cidr 0.0.0.0/0
@@ -145,7 +138,7 @@ if [ "$ALB_ARN" == "None" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Load Balancer..."
   ALB_ARN=$(aws elbv2 create-load-balancer --name $ALB_NAME --subnets $SUBNET_ID1 $SUBNET_ID2 --security-groups $SG_ID --query 'LoadBalancers[0].LoadBalancerArn' --output text)
   check_error "Failed to create Load Balancer"
-  sleep 30  # Allow time for ALB to become available
+  sleep 30
 else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Load Balancer already exists with ARN $ALB_ARN."
 fi
@@ -168,14 +161,15 @@ else
 fi
 
 # Create Listeners
-if ! aws elbv2 describe-listeners --load-balancer-arn $ALB_ARN --query 'Listeners[?Port==`80`]' --output text | grep -q $TG_ARN_NGINX; then
+LISTENERS=$(aws elbv2 describe-listeners --load-balancer-arn $ALB_ARN --query 'Listeners[*].Port' --output text)
+if [[ ! $LISTENERS =~ $PORT_NGINX ]]; then
   aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT_NGINX --default-actions Type=forward,TargetGroupArn=$TG_ARN_NGINX
   check_error "Failed to create Listener for NGINX"
 else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Listener for NGINX already exists."
 fi
 
-if ! aws elbv2 describe-listeners --load-balancer-arn $ALB_ARN --query 'Listeners[?Port==`81`]' --output text | grep -q $TG_ARN_NPM; then
+if [[ ! $LISTENERS =~ $PORT_NPM ]]; then
   aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT_NPM --default-actions Type=forward,TargetGroupArn=$TG_ARN_NPM
   check_error "Failed to create Listener for Nginx Proxy Manager"
 else
@@ -183,10 +177,10 @@ else
 fi
 
 # Create ECS Task Execution Role
-ROLE_ARN=$(aws iam get-role --role-name $EXECUTION_ROLE_NAME --query 'Role.Arn' --output text)
-if [ "$ROLE_ARN" == "None" ]; then
+ROLE_ARN=$(aws iam get-role --role-name $EXECUTION_ROLE_NAME --query 'Role.Arn' --output text 2>/dev/null)
+if [ -z "$ROLE_ARN" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Task Execution Role..."
-  aws iam create-role --role-name $EXECUTION_ROLE_NAME --assume-role-policy-document "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Principal\": {\"Service\": \"ecs-tasks.amazonaws.com\"}, \"Action\": \"sts:AssumeRole\"}]}"
+  aws iam create-role --role-name $EXECUTION_ROLE_NAME --assume-role-policy-document '{"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Principal": {"Service": "ecs-tasks.amazonaws.com"}, "Action": "sts:AssumeRole"}]}'
   check_error "Failed to create ECS Task Execution Role"
   aws iam attach-role-policy --role-name $EXECUTION_ROLE_NAME --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
   check_error "Failed to attach policy to ECS Task Execution Role"
@@ -208,4 +202,7 @@ check_error "Failed to create ECS Service for NGINX"
 aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NPM --task-definition $TASK_FAMILY_NPM --desired-count 1 --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" --load-balancers "targetGroupArn=$TG_ARN_NPM,containerName=$CONTAINER_NAME_NPM,containerPort=$PORT_NPM"
 check_error "Failed to create ECS Service for Nginx Proxy Manager"
 
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment completed successfully."
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment complete."
+ALB_DNS=$(aws elbv2 describe-load-balancers --names $ALB_NAME --query 'LoadBalancers[0].DNSName' --output text)
+echo "Access NGINX at http://$ALB_DNS"
+echo "Access Nginx Proxy Manager at http://$ALB_DNS:$PORT_NPM"
