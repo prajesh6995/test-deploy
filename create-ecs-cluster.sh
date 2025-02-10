@@ -12,8 +12,6 @@ NAMESPACE="nginx-namespace"
 VPC_CIDR="10.0.0.0/16"
 SUBNET_CIDR1="10.0.1.0/24"
 SUBNET_CIDR2="10.0.2.0/24"
-AZ1="us-east-1a"
-AZ2="us-east-1b"
 ALB_NAME="nginx-alb"
 TG_NAME="nginx-tg"
 SG_NAME="nginx-sg"
@@ -39,6 +37,11 @@ get_arn_or_exit() {
     exit 1
   fi
 }
+
+# Retrieve available AZs dynamically
+AVAILABLE_AZS=($(aws ec2 describe-availability-zones --region $REGION --query 'AvailabilityZones[*].ZoneName' --output text))
+AZ1=${AVAILABLE_AZS[0]}
+AZ2=${AVAILABLE_AZS[1]}
 
 # Check and Create VPC
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Checking for existing VPC..."
@@ -76,6 +79,15 @@ fi
 
 # Create Subnets in Different AZs
 SUBNET_ID1=$(aws ec2 describe-subnets --filters Name=cidr-block,Values=$SUBNET_CIDR1 --query 'Subnets[0].SubnetId' --output text)
+if [ "$SUBNET_ID1" != "None" ] && [ -n "$SUBNET_ID1" ]; then
+  EXISTING_AZ1=$(aws ec2 describe-subnets --subnet-ids $SUBNET_ID1 --query 'Subnets[0].AvailabilityZone' --output text)
+  if [ "$EXISTING_AZ1" != "$AZ1" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleting Subnet 1 due to AZ mismatch..."
+    aws ec2 delete-subnet --subnet-id $SUBNET_ID1
+    SUBNET_ID1=""
+  fi
+fi
+
 if [ "$SUBNET_ID1" == "None" ] || [ -z "$SUBNET_ID1" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Subnet 1 in $AZ1..."
   SUBNET_ID1=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block $SUBNET_CIDR1 --availability-zone $AZ1 --query 'Subnet.SubnetId' --output text)
@@ -85,6 +97,15 @@ if [ "$SUBNET_ID1" == "None" ] || [ -z "$SUBNET_ID1" ]; then
 fi
 
 SUBNET_ID2=$(aws ec2 describe-subnets --filters Name=cidr-block,Values=$SUBNET_CIDR2 --query 'Subnets[0].SubnetId' --output text)
+if [ "$SUBNET_ID2" != "None" ] && [ -n "$SUBNET_ID2" ]; then
+  EXISTING_AZ2=$(aws ec2 describe-subnets --subnet-ids $SUBNET_ID2 --query 'Subnets[0].AvailabilityZone' --output text)
+  if [ "$EXISTING_AZ2" != "$AZ2" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleting Subnet 2 due to AZ mismatch..."
+    aws ec2 delete-subnet --subnet-id $SUBNET_ID2
+    SUBNET_ID2=""
+  fi
+fi
+
 if [ "$SUBNET_ID2" == "None" ] || [ -z "$SUBNET_ID2" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Subnet 2 in $AZ2..."
   SUBNET_ID2=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block $SUBNET_CIDR2 --availability-zone $AZ2 --query 'Subnet.SubnetId' --output text)
