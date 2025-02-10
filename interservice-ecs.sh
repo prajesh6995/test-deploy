@@ -196,30 +196,14 @@ aws ecs register-task-definition \
 
 # Register ECS Task Definition for Nginx Proxy Manager
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Registering ECS Task Definition for Nginx Proxy Manager..."
-NPM_TASK_DEFINITION=$(cat <<EOF
-[
-    {
-        "name": "$CONTAINER_NAME_NPM",
-        "image": "$IMAGE_URI_NPM",
-        "portMappings": [
-            {
-                "containerPort": $PORT_NPM
-            }
-        ]
-    }
-]
-EOF
-)
-
 aws ecs register-task-definition \
-  --family $TASK_FAMILY_NPM \
+  --family nginx-proxy-manager-task \
   --network-mode awsvpc \
   --requires-compatibilities FARGATE \
   --cpu "256" \
   --memory "512" \
-  --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$EXECUTION_ROLE_NAME \
-  --container-definitions "$NPM_TASK_DEFINITION"
-check_error "Failed to register ECS Task Definition for Nginx Proxy Manager"
+  --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/ecsTaskExecutionRole \
+  --container-definitions '[{"name":"nginx-proxy-manager-container","image":"jc21/nginx-proxy-manager:latest","portMappings":[{"containerPort":81}]}]'
 
 # Check if NGINX Service exists
 SERVICE_EXISTS_NGINX=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME_NGINX --query 'services[0].status' --output text)
