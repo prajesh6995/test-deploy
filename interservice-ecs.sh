@@ -19,7 +19,7 @@ SUBNET_CIDR2="10.0.2.0/24"
 ALB_NAME="nginx-alb"
 TG_NAME_NGINX="nginx-tg"
 TG_NAME_NPM="nginx-proxy-manager-tg"
-SG_NAME="nginx-sg"
+SG_NAME="nginx-sg-new"
 EXECUTION_ROLE_NAME="ecsTaskExecutionRole"
 TASK_ROLE_NAME="ecsTaskRole"
 
@@ -136,7 +136,7 @@ if [ -z "$EXISTING_EGRESS_RULE" ]; then
   aws ec2 authorize-security-group-egress --group-id $SG_ID --protocol -1 --cidr 0.0.0.0/0
   check_error "Failed to set security group egress rules"
 else
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - Egress rule already exists."
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Egress rule already exists. Skipping..."
 fi
 
 # Create Load Balancer
