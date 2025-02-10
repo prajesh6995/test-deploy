@@ -112,10 +112,10 @@ else
 fi
 
 # Set Ingress Rules
-aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT_NGINX --cidr 0.0.0.0/0
-check_error "Failed to set security group ingress rules for NGINX"
-aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT_NPM --cidr 0.0.0.0/0
-check_error "Failed to set security group ingress rules for Nginx Proxy Manager"
+# aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT_NGINX --cidr 0.0.0.0/0
+# check_error "Failed to set security group ingress rules for NGINX"
+# aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT_NPM --cidr 0.0.0.0/0
+# check_error "Failed to set security group ingress rules for Nginx Proxy Manager"
 
 # Set Egress Rules
 # aws ec2 authorize-security-group-egress --group-id $SG_ID --protocol -1 --cidr 0.0.0.0/0
