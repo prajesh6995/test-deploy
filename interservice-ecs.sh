@@ -124,85 +124,74 @@ if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups
 else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Egress rule already exists."
 fi
-# Create Load Balancer for Reverse Proxy
-ALB_ARN=$(aws elbv2 create-load-balancer --name $ALB_NAME --subnets $SUBNET_ID1 $SUBNET_ID2 --security-groups $SG_ID --query 'LoadBalancers[0].LoadBalancerArn' --output text)
-check_error "Failed to create Load Balancer"
 
-# Create Target Group for Reverse Proxy
-TG_ARN=$(aws elbv2 create-target-group --name $TG_NAME --protocol HTTP --port $PORT --vpc-id $VPC_ID --target-type ip --query 'TargetGroups[0].TargetGroupArn' --output text)
-check_error "Failed to create Target Group"
-
-# Create Listener for ALB
-aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT --default-actions Type=forward,TargetGroupArn=$TG_ARN
-check_error "Failed to create Listener"
-
-# Register ECS Task Definition with NGINX Reverse Proxy
+# Task Definitions and Service Creation for NGINX
 aws ecs register-task-definition \
   --family $TASK_FAMILY \
   --network-mode awsvpc \
   --requires-compatibilities FARGATE \
+  --execution-role-arn arn:aws:iam::$AWS_ACCOUNT_ID:role/$EXECUTION_ROLE_NAME \
+  --task-role-arn arn:aws:iam::$AWS_ACCOUNT_ID:role/$TASK_ROLE_NAME \
   --cpu "256" \
   --memory "512" \
-  --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$EXECUTION_ROLE_NAME \
-  --task-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$TASK_ROLE_NAME \
-  --container-definitions '[
+  --container-definitions "[
     {
-      "name": "'$CONTAINER_NAME'",
-      "image": "'$IMAGE_URI'",
-      "portMappings": [
+      \"name\": \"$CONTAINER_NAME\",
+      \"image\": \"$IMAGE_URI\",
+      \"portMappings\": [
         {
-          "containerPort": '$PORT',
-          "hostPort": '$PORT',
-          "protocol": "tcp"
+          \"containerPort\": 80,
+          \"hostPort\": 0,
+          \"protocol\": \"tcp\"
         }
       ],
-      "essential": true
+      \"essential\": true
     }
-  ]'
+  ]"
 check_error "Failed to register ECS Task Definition"
 
-# Create ECS Service with Reverse Proxy
-aws ecs create-service \
-  --cluster $CLUSTER_NAME \
-  --service-name $SERVICE_NAME \
-  --task-definition $TASK_FAMILY \
-  --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_ID1,$SUBNET_ID2],securityGroups=[$SG_ID],assignPublicIp=ENABLED}" \
-  --load-balancers "targetGroupArn=$TG_ARN,containerName=$CONTAINER_NAME,containerPort=$PORT" \
-  --desired-count 1
-check_error "Failed to create ECS Service with Reverse Proxy"
-
-# Register ECS Task Definition for NGINX Reverse Proxy as App Service
+# Task Definitions and Service Creation for Reverse Proxy App
 aws ecs register-task-definition \
   --family $APP_TASK_FAMILY \
   --network-mode awsvpc \
   --requires-compatibilities FARGATE \
+  --execution-role-arn arn:aws:iam::$AWS_ACCOUNT_ID:role/$EXECUTION_ROLE_NAME \
+  --task-role-arn arn:aws:iam::$AWS_ACCOUNT_ID:role/$TASK_ROLE_NAME \
   --cpu "256" \
   --memory "512" \
-  --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$EXECUTION_ROLE_NAME \
-  --task-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$TASK_ROLE_NAME \
-  --container-definitions '[
+  --container-definitions "[
     {
-      "name": "'$APP_CONTAINER_NAME'",
-      "image": "'$APP_IMAGE_URI'",
-      "portMappings": [
+      \"name\": \"$APP_CONTAINER_NAME\",
+      \"image\": \"$APP_IMAGE_URI\",
+      \"portMappings\": [
         {
-          "containerPort": '$APP_PORT',
-          "hostPort": '$APP_PORT',
-          "protocol": "tcp"
+          \"containerPort\": 8733,
+          \"hostPort\": 0,
+          \"protocol\": \"tcp\"
         }
       ],
-      "essential": true
+      \"essential\": true
     }
-  ]'
-check_error "Failed to register App ECS Task Definition"
+  ]"
+check_error "Failed to register App Task Definition"
 
-# Create ECS Service for NGINX Reverse Proxy as App
+# Create ECS Services
+aws ecs create-service \
+  --cluster $CLUSTER_NAME \
+  --service-name $SERVICE_NAME \
+  --task-definition $TASK_FAMILY \
+  --desired-count 1 \
+  --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_ID1,$SUBNET_ID2],securityGroups=[$SG_ID],assignPublicIp=ENABLED}"
+check_error "Failed to create ECS NGINX Service"
+
 aws ecs create-service \
   --cluster $CLUSTER_NAME \
   --service-name $APP_SERVICE_NAME \
   --task-definition $APP_TASK_FAMILY \
+  --desired-count 1 \
   --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_ID1,$SUBNET_ID2],securityGroups=[$SG_ID],assignPublicIp=ENABLED}" \
-  --desired-count 1
-check_error "Failed to create App ECS Service"
+  --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_ID1,$SUBNET_ID2],securityGroups=[$SG_ID],assignPublicIp=ENABLED}"
+check_error "Failed to create ECS App Service"
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') - ECS Services created successfully."
