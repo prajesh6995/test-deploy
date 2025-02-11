@@ -102,7 +102,12 @@ AZ2=${AVAILABLE_AZS[1]}
 
 aws ecs list-clusters --output table
 
-if ! aws ecs describe-clusters --clusters $CLUSTER_NAME --region $REGION --query 'clusters[0].status' --output text | grep -q 'ACTIVE'; then
+CLUSTER_STATUS=$(aws ecs describe-clusters --clusters $CLUSTER_NAME --region $REGION --query 'clusters[0].status' --output text)
+
+echo "CLUSTER_STATUS : $CLUSTER_STATUS"
+
+# If the cluster doesn't exist, the command will return 'None'
+if [ "$CLUSTER_STATUS" == "None" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Cluster..."
   aws ecs create-cluster --cluster-name $CLUSTER_NAME --region $REGION
   check_error "Failed to create ECS Cluster"
