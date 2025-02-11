@@ -43,7 +43,7 @@ CREATED_RESOURCES=(
 check_error() {
   if [ $? -ne 0 ]; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: $1"
-    rollback
+    #rollback
     exit 1
   fi
 }
@@ -327,8 +327,11 @@ check_error "Failed to register ECS Task Definition for Nginx Proxy Manager"
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for NGINX..."
 aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NGINX \
   --task-definition $TASK_FAMILY_NGINX --desired-count 1 \
-  --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
-  --load-balancers "targetGroupArn=$TG_ARN_NGINX,containerName=$CONTAINER_NAME_NGINX,containerPort=$PORT_NGINX"
+  --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
+  --load-balancers "targetGroupArn=$TG_ARN_NGINX,containerName=$CONTAINER_NAME_NGINX,containerPort=$PORT_NGINX" \
+  --query "service.serviceName" --output text
+
 check_error "Failed to create ECS Service for NGINX"
 CREATED_RESOURCES["ECS_SERVICE_NGINX"]=$SERVICE_NAME_NGINX
 
@@ -336,10 +339,15 @@ CREATED_RESOURCES["ECS_SERVICE_NGINX"]=$SERVICE_NAME_NGINX
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for Nginx Proxy Manager..."
 aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NPM \
   --task-definition $TASK_FAMILY_NPM --desired-count 1 \
-  --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
-  --load-balancers "targetGroupArn=$TG_ARN_NPM,containerName=$CONTAINER_NAME_NPM,containerPort=$PORT_NPM"
+  --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
+  --load-balancers "targetGroupArn=$TG_ARN_NPM,containerName=$CONTAINER_NAME_NPM,containerPort=$PORT_NPM" \
+  --query "service.serviceName" --output text
+
 check_error "Failed to create ECS Service for Nginx Proxy Manager"
 CREATED_RESOURCES["ECS_SERVICE_NPM"]=$SERVICE_NAME_NPM
+
+
 
 # Output Load Balancer DNS
 ALB_DNS=$(aws elbv2 describe-load-balancers --load-balancer-arns $ALB_ARN --query 'LoadBalancers[0].DNSName' --output text)
