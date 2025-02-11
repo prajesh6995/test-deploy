@@ -170,15 +170,21 @@ else
 fi
 
 # Create Security Group
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Security Group..."
+echo "SG_NAME: $SG_NAME"
+echo "VPC_ID: $VPC_ID"
+
 SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=$SG_NAME" "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text)
-if [ -z "$SG_ID" ]; then
+echo "SG_ID: $SG_ID"
+
+if [ "$SG_ID" == "None" ] || [ -z "$SG_ID" ]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Security Group not found, creating..."
   SG_ID=$(aws ec2 create-security-group --group-name $SG_NAME --description "Security group for NGINX ALB" --vpc-id $VPC_ID --query 'GroupId' --output text)
   check_error "Failed to create Security Group"
   CREATED_RESOURCES["SG"]=$SG_ID
 else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Security Group already exists with ID $SG_ID."
 fi
+
 
 # Set Ingress Rule if not exists
 if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissions[?FromPort==`80` && ToPort==`80` && IpProtocol==`tcp`]' --output text | grep -q '0.0.0.0/0'; then
