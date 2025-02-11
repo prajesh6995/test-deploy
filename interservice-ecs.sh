@@ -316,7 +316,7 @@ aws ecs register-task-definition --family $TASK_FAMILY_NGINX \
     "portMappings": [
       {
         "containerPort": '$PORT_NGINX',
-        "hostPort": 0,
+        "hostPort": '$PORT_NGINX',
         "protocol": "tcp"
       }
     ],
@@ -337,7 +337,7 @@ aws ecs register-task-definition --family $TASK_FAMILY_NPM \
     "portMappings": [
       {
         "containerPort": '$PORT_NPM',
-        "hostPort": 0,
+        "hostPort": '$PORT_NPM',
         "protocol": "tcp"
       }
     ],
