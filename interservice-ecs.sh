@@ -107,7 +107,7 @@ CLUSTER_STATUS=$(aws ecs describe-clusters --clusters $CLUSTER_NAME --region $RE
 echo "CLUSTER_STATUS : $CLUSTER_STATUS"
 
 # If the cluster doesn't exist, the command will return 'None'
-if [ "$CLUSTER_STATUS" == "None" ]; then
+if [ "$CLUSTER_STATUS" == "INACTIVE" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Cluster..."
   aws ecs create-cluster --cluster-name $CLUSTER_NAME --region $REGION
   check_error "Failed to create ECS Cluster"
