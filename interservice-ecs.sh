@@ -309,7 +309,6 @@ NGINX_REGISTER_OUTPUT=$(aws ecs register-task-definition \
   --requires-compatibilities FARGATE \
   --cpu "256" --memory "512" \
   --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$EXECUTION_ROLE_NAME \
-  #--task-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$TASK_ROLE_NAME \
   --container-definitions "[
     {
       \"name\": \"$CONTAINER_NAME_NGINX\",
@@ -331,7 +330,6 @@ NPM_REGISTER_OUTPUT=$(aws ecs register-task-definition \
   --requires-compatibilities FARGATE \
   --cpu "256" --memory "512" \
   --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$EXECUTION_ROLE_NAME \
- # --task-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$TASK_ROLE_NAME \
   --container-definitions "[
     {
       \"name\": \"$CONTAINER_NAME_NPM\",
