@@ -346,42 +346,50 @@ fi
 
 
 # Create ECS Service for NGINX
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for NGINX..."
-NGINX_SERVICE_OUTPUT=$(aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NGINX \
-  --task-definition $TASK_FAMILY_NGINX --desired-count 1 \
-  --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
-  --load-balancers "targetGroupArn=$TG_ARN_NGINX,containerName=$CONTAINER_NAME_NGINX,containerPort=$PORT_NGINX" \
-  --query "service.serviceName" --output text 2>&1)
+SERVICE_STATUS_NGINX=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME_NGINX --query 'services[0].status' --output text 2>&1)
 
-if [ $? -ne 0 ]; then
-  echo "Failed to create ECS Service for NGINX. Error: $NGINX_SERVICE_OUTPUT"
-  exit 1
+if [ "$SERVICE_STATUS_NGINX" != "ACTIVE" ]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for NGINX..."
+  NGINX_SERVICE_OUTPUT=$(aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NGINX \
+    --task-definition $TASK_FAMILY_NGINX --desired-count 1 \
+    --launch-type FARGATE \
+    --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
+    --load-balancers "targetGroupArn=$TG_ARN_NGINX,containerName=$CONTAINER_NAME_NGINX,containerPort=$PORT_NGINX" \
+    --query "service.serviceName" --output text 2>&1)
+
+  if [ $? -ne 0 ]; then
+    echo "Failed to create ECS Service for NGINX. Error: $NGINX_SERVICE_OUTPUT"
+    exit 1
+  else
+    echo "ECS Service for NGINX created successfully: $NGINX_SERVICE_OUTPUT"
+  fi
 else
-  echo "ECS Service for NGINX created successfully: $NGINX_SERVICE_OUTPUT"
+  echo "ECS Service for NGINX already exists and is active."
 fi
 CREATED_RESOURCES["ECS_SERVICE_NGINX"]=$SERVICE_NAME_NGINX
 
 # Create ECS Service for Nginx Proxy Manager
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for Nginx Proxy Manager..."
-NPM_SERVICE_OUTPUT=$(aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NPM \
-  --task-definition $TASK_FAMILY_NPM --desired-count 1 \
-  --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
-  --load-balancers "targetGroupArn=$TG_ARN_NPM,containerName=$CONTAINER_NAME_NPM,containerPort=$PORT_NPM" \
-  --query "service.serviceName" --output text 2>&1)
+SERVICE_STATUS_NPM=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME_NPM --query 'services[0].status' --output text 2>&1)
 
-if [ $? -ne 0 ]; then
-  echo "Failed to create ECS Service for Nginx Proxy Manager. Error: $NPM_SERVICE_OUTPUT"
-  exit 1
+if [ "$SERVICE_STATUS_NPM" != "ACTIVE" ]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for Nginx Proxy Manager..."
+  NPM_SERVICE_OUTPUT=$(aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NPM \
+    --task-definition $TASK_FAMILY_NPM --desired-count 1 \
+    --launch-type FARGATE \
+    --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
+    --load-balancers "targetGroupArn=$TG_ARN_NPM,containerName=$CONTAINER_NAME_NPM,containerPort=$PORT_NPM" \
+    --query "service.serviceName" --output text 2>&1)
+
+  if [ $? -ne 0 ]; then
+    echo "Failed to create ECS Service for Nginx Proxy Manager. Error: $NPM_SERVICE_OUTPUT"
+    exit 1
+  else
+    echo "ECS Service for Nginx Proxy Manager created successfully: $NPM_SERVICE_OUTPUT"
+  fi
 else
-  echo "ECS Service for Nginx Proxy Manager created successfully: $NPM_SERVICE_OUTPUT"
+  echo "ECS Service for Nginx Proxy Manager already exists and is active."
 fi
 CREATED_RESOURCES["ECS_SERVICE_NPM"]=$SERVICE_NAME_NPM
-
-
-
-
 
 # Output Load Balancer DNS
 ALB_DNS=$(aws elbv2 describe-load-balancers --load-balancer-arns $ALB_ARN --query 'LoadBalancers[0].DNSName' --output text)
