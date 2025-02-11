@@ -259,20 +259,30 @@ aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $P
 check_error "Failed to create Listener for Nginx Proxy Manager"
 
 # Create ECS Task Execution Role
-TRUST_POLICY='{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "ecs-tasks.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}'
-aws iam create-role --role-name $EXECUTION_ROLE_NAME --assume-role-policy-document "$TRUST_POLICY"
-check_error "Failed to create ECS Task Execution Role"
+# Check and Create IAM Role for ECS Task Execution
+ROLE_NAME="ecsTaskExecutionRole"
+ROLE_EXISTS=$(aws iam get-role --role-name $ROLE_NAME --query 'Role.RoleName' --output text 2>/dev/null)
+if [ "$ROLE_EXISTS" != "$ROLE_NAME" ]; then
+  echo "Creating IAM Role for ECS Task Execution..."
+  TRUST_POLICY='{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Principal": {
+          "Service": "ecs-tasks.amazonaws.com"
+        },
+        "Action": "sts:AssumeRole"
+      }
+    ]
+  }'
+  aws iam create-role --role-name $ROLE_NAME --assume-role-policy-document "$TRUST_POLICY"
+  aws iam attach-role-policy --role-name $ROLE_NAME --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+  echo "IAM Role '$ROLE_NAME' created and policy attached."
+else
+  echo "IAM Role '$ROLE_NAME' already exists."
+fi
+ROLE_ARN=$(aws iam get-role --role-name $ROLE_NAME --query 'Role.Arn' --output text)
 
 # Attach AmazonECSTaskExecutionRolePolicy to the execution role
 aws iam attach-role-policy --role-name $EXECUTION_ROLE_NAME --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
