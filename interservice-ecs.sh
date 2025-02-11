@@ -236,17 +236,32 @@ check_error "Failed to create Load Balancer"
 CREATED_RESOURCES["ALB"]=$ALB_ARN
 sleep 30  # Allow time for ALB to become available
 
-# Create Target Group for NGINX
+# Create Target Group for NGINX with ip target type
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Target Group for NGINX..."
-TG_ARN_NGINX=$(aws elbv2 create-target-group --name $TG_NAME_NGINX --protocol HTTP --port $PORT_NGINX --vpc-id $VPC_ID --query 'TargetGroups[0].TargetGroupArn' --output text)
+TG_ARN_NGINX=$(aws elbv2 create-target-group \
+  --name $TG_NAME_NGINX \
+  --protocol HTTP \
+  --port $PORT_NGINX \
+  --vpc-id $VPC_ID \
+  --target-type ip \
+  --query 'TargetGroups[0].TargetGroupArn' \
+  --output text)
 check_error "Failed to create Target Group for NGINX"
 CREATED_RESOURCES["TG_NGINX"]=$TG_ARN_NGINX
 
-# Create Target Group for Nginx Proxy Manager
+# Create Target Group for Nginx Proxy Manager with ip target type
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Target Group for Nginx Proxy Manager..."
-TG_ARN_NPM=$(aws elbv2 create-target-group --name $TG_NAME_NPM --protocol HTTP --port $PORT_NPM --vpc-id $VPC_ID --query 'TargetGroups[0].TargetGroupArn' --output text)
+TG_ARN_NPM=$(aws elbv2 create-target-group \
+  --name $TG_NAME_NPM \
+  --protocol HTTP \
+  --port $PORT_NPM \
+  --vpc-id $VPC_ID \
+  --target-type ip \
+  --query 'TargetGroups[0].TargetGroupArn' \
+  --output text)
 check_error "Failed to create Target Group for Nginx Proxy Manager"
 CREATED_RESOURCES["TG_NPM"]=$TG_ARN_NPM
+
 
 # Create Listener for NGINX
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Listener for NGINX..."
