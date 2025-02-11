@@ -1,4 +1,4 @@
-/bin/bash
+#!/bin/bash
 
 # Set variables
 CLUSTER_NAME="nginx-cluster"
@@ -23,12 +23,74 @@ SG_NAME="nginx-sg"
 EXECUTION_ROLE_NAME="ecsTaskExecutionRole"
 TASK_ROLE_NAME="ecsTaskRole"
 
+# Track created resources for rollback
+declare -A CREATED_RESOURCES
+CREATED_RESOURCES=(
+  ["ECS_CLUSTER"]=""
+  ["VPC"]=""
+  ["IGW"]=""
+  ["SUBNET1"]=""
+  ["SUBNET2"]=""
+  ["SG"]=""
+  ["ALB"]=""
+  ["TG_NGINX"]=""
+  ["TG_NPM"]=""
+  ["ECS_SERVICE_NGINX"]=""
+  ["ECS_SERVICE_NPM"]=""
+)
+
 # Function to check for errors
 check_error() {
   if [ $? -ne 0 ]; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: $1"
-    exit 1;
+    rollback
+    exit 1
   fi
+}
+
+# Function to rollback resources
+rollback() {
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Rolling back resources..."
+  for resource in "${!CREATED_RESOURCES[@]}"; do
+    if [ -n "${CREATED_RESOURCES[$resource]}" ]; then
+      case $resource in
+        "ECS_CLUSTER")
+          echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleting ECS Cluster..."
+          aws ecs delete-cluster --cluster $CLUSTER_NAME
+          ;;
+        "VPC")
+          echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleting VPC..."
+          aws ec2 delete-vpc --vpc-id ${CREATED_RESOURCES[$resource]}
+          ;;
+        "IGW")
+          echo "$(date '+%Y-%m-%d %H:%M:%S') - Detaching and deleting Internet Gateway..."
+          aws ec2 detach-internet-gateway --internet-gateway-id ${CREATED_RESOURCES[$resource]} --vpc-id ${CREATED_RESOURCES["VPC"]}
+          aws ec2 delete-internet-gateway --internet-gateway-id ${CREATED_RESOURCES[$resource]}
+          ;;
+        "SUBNET1"|"SUBNET2")
+          echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleting Subnet ${CREATED_RESOURCES[$resource]}..."
+          aws ec2 delete-subnet --subnet-id ${CREATED_RESOURCES[$resource]}
+          ;;
+        "SG")
+          echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleting Security Group..."
+          aws ec2 delete-security-group --group-id ${CREATED_RESOURCES[$resource]}
+          ;;
+        "ALB")
+          echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleting Load Balancer..."
+          aws elbv2 delete-load-balancer --load-balancer-arn ${CREATED_RESOURCES[$resource]}
+          ;;
+        "TG_NGINX"|"TG_NPM")
+          echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleting Target Group ${CREATED_RESOURCES[$resource]}..."
+          aws elbv2 delete-target-group --target-group-arn ${CREATED_RESOURCES[$resource]}
+          ;;
+        "ECS_SERVICE_NGINX"|"ECS_SERVICE_NPM")
+          echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleting ECS Service ${CREATED_RESOURCES[$resource]}..."
+          aws ecs delete-service --cluster $CLUSTER_NAME --service ${CREATED_RESOURCES[$resource]} --force
+          ;;
+      esac
+    fi
+  done
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Rollback complete."
 }
 
 # Retrieve available AZs dynamically
@@ -41,6 +103,7 @@ if ! aws ecs describe-clusters --clusters $CLUSTER_NAME --query 'clusters[0].sta
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Cluster..."
   aws ecs create-cluster --cluster-name $CLUSTER_NAME
   check_error "Failed to create ECS Cluster"
+  CREATED_RESOURCES["ECS_CLUSTER"]=$CLUSTER_NAME
 else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - ECS Cluster already exists."
 fi
@@ -50,6 +113,7 @@ if ! aws ec2 describe-vpcs --filters "Name=cidr-block,Values=$VPC_CIDR" --query 
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating VPC..."
   VPC_ID=$(aws ec2 create-vpc --cidr-block $VPC_CIDR --query 'Vpc.VpcId' --output text)
   check_error "Failed to create VPC"
+  CREATED_RESOURCES["VPC"]=$VPC_ID
 else
   VPC_ID=$(aws ec2 describe-vpcs --filters "Name=cidr-block,Values=$VPC_CIDR" --query 'Vpcs[0].VpcId' --output text)
   echo "$(date '+%Y-%m-%d %H:%M:%S') - VPC already exists with ID $VPC_ID."
@@ -65,6 +129,7 @@ if ! aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values
   check_error "Failed to create Internet Gateway"
   aws ec2 attach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID
   check_error "Failed to attach Internet Gateway"
+  CREATED_RESOURCES["IGW"]=$IGW_ID
 else
   IGW_ID=$(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$VPC_ID" --query 'InternetGateways[0].InternetGatewayId' --output text)
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Internet Gateway already attached with ID $IGW_ID."
@@ -87,6 +152,7 @@ if [ -z "$SUBNET_ID1" ]; then
   check_error "Failed to create Subnet 1"
   aws ec2 associate-route-table --subnet-id $SUBNET_ID1 --route-table-id $ROUTE_TABLE_ID
   aws ec2 modify-subnet-attribute --subnet-id $SUBNET_ID1 --map-public-ip-on-launch
+  CREATED_RESOURCES["SUBNET1"]=$SUBNET_ID1
 else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Subnet 1 already exists with ID $SUBNET_ID1."
 fi
@@ -98,6 +164,7 @@ if [ -z "$SUBNET_ID2" ]; then
   check_error "Failed to create Subnet 2"
   aws ec2 associate-route-table --subnet-id $SUBNET_ID2 --route-table-id $ROUTE_TABLE_ID
   aws ec2 modify-subnet-attribute --subnet-id $SUBNET_ID2 --map-public-ip-on-launch
+  CREATED_RESOURCES["SUBNET2"]=$SUBNET_ID2
 else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Subnet 2 already exists with ID $SUBNET_ID2."
 fi
@@ -108,6 +175,7 @@ SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=$SG_N
 if [ -z "$SG_ID" ]; then
   SG_ID=$(aws ec2 create-security-group --group-name $SG_NAME --description "Security group for NGINX ALB" --vpc-id $VPC_ID --query 'GroupId' --output text)
   check_error "Failed to create Security Group"
+  CREATED_RESOURCES["SG"]=$SG_ID
 else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Security Group already exists with ID $SG_ID."
 fi
@@ -122,21 +190,33 @@ else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Ingress rule already exists."
 fi
 
+# Set Egress Rule if not exists
+if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissionsEgress[?IpProtocol==`-1` && IpRanges[?CidrIp==`0.0.0.0/0`]]' --output text | grep -q '0.0.0.0/0'; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Adding egress rule to Security Group..."
+  aws ec2 authorize-security-group-egress --group-id $SG_ID --protocol -1 --cidr 0.0.0.0/0
+  check_error "Failed to set security group egress rules"
+else
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Egress rule already exists."
+fi
+
 # Create Load Balancer
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Load Balancer..."
 ALB_ARN=$(aws elbv2 create-load-balancer --name $ALB_NAME --subnets $SUBNET_ID1 $SUBNET_ID2 --security-groups $SG_ID --query 'LoadBalancers[0].LoadBalancerArn' --output text)
 check_error "Failed to create Load Balancer"
+CREATED_RESOURCES["ALB"]=$ALB_ARN
 sleep 30  # Allow time for ALB to become available
 
 # Create Target Group for NGINX
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Target Group for NGINX..."
 TG_ARN_NGINX=$(aws elbv2 create-target-group --name $TG_NAME_NGINX --protocol HTTP --port $PORT_NGINX --vpc-id $VPC_ID --query 'TargetGroups[0].TargetGroupArn' --output text)
 check_error "Failed to create Target Group for NGINX"
+CREATED_RESOURCES["TG_NGINX"]=$TG_ARN_NGINX
 
 # Create Target Group for Nginx Proxy Manager
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Target Group for Nginx Proxy Manager..."
 TG_ARN_NPM=$(aws elbv2 create-target-group --name $TG_NAME_NPM --protocol HTTP --port $PORT_NPM --vpc-id $VPC_ID --query 'TargetGroups[0].TargetGroupArn' --output text)
 check_error "Failed to create Target Group for Nginx Proxy Manager"
+CREATED_RESOURCES["TG_NPM"]=$TG_ARN_NPM
 
 # Create Listener for NGINX
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Listener for NGINX..."
@@ -148,76 +228,65 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Listener for Nginx Proxy Manager..
 aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT_NPM --default-actions Type=forward,TargetGroupArn=$TG_ARN_NPM
 check_error "Failed to create Listener for Nginx Proxy Manager"
 
-# Check and Create IAM Role for ECS Task Execution
-ROLE_EXISTS=$(aws iam get-role --role-name $EXECUTION_ROLE_NAME --query 'Role.RoleName' --output text 2>/dev/null)
-if [ "$ROLE_EXISTS" != "$EXECUTION_ROLE_NAME" ]; then
-  echo "Creating IAM Role for ECS Task Execution..."
-  TRUST_POLICY='{
-    "Version": "2012-10-17",
-    "Statement": [
-      {
-        "Effect": "Allow",
-        "Principal": {
-          "Service": "ecs-tasks.amazonaws.com"
-        },
-        "Action": "sts:AssumeRole"
-      }
-    ]
-  }'
-  aws iam create-role --role-name $EXECUTION_ROLE_NAME --assume-role-policy-document "$TRUST_POLICY"
-  aws iam attach-role-policy --role-name $EXECUTION_ROLE_NAME --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-  echo "IAM Role '$EXECUTION_ROLE_NAME' created and policy attached."
-else
-  echo "IAM Role '$EXECUTION_ROLE_NAME' already exists."
-fi
+# Create ECS Task Execution Role
+TRUST_POLICY='{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}'
+aws iam create-role --role-name $EXECUTION_ROLE_NAME --assume-role-policy-document "$TRUST_POLICY"
+check_error "Failed to create ECS Task Execution Role"
 
 # Attach AmazonECSTaskExecutionRolePolicy to the execution role
 aws iam attach-role-policy --role-name $EXECUTION_ROLE_NAME --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 check_error "Failed to attach policy to ECS Task Execution Role"
 
 # Register ECS Task Definition for NGINX
-aws ecs register-task-definition \
-  --family $TASK_FAMILY_NGINX \
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Registering ECS Task Definition for NGINX..."
+aws ecs register-task-definition --family $TASK_FAMILY_NGINX \
   --network-mode awsvpc \
   --requires-compatibilities FARGATE \
-  --cpu "256" \
-  --memory "512" \
+  --cpu "256" --memory "512" \
   --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$EXECUTION_ROLE_NAME \
-  --container-definitions '[{"name":"$CONTAINER_NAME_NGINX","image":"$IMAGE_URI_NGINX","portMappings":[{"containerPort":80}]}]'
+  --container-definitions '[{"name":"'$CONTAINER_NAME_NGINX'","image":"'$IMAGE_URI_NGINX'","portMappings":[{"containerPort":'$PORT_NGINX'}]}]'
+check_error "Failed to register ECS Task Definition for NGINX"
 
 # Register ECS Task Definition for Nginx Proxy Manager
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Registering ECS Task Definition for Nginx Proxy Manager..."
-aws ecs register-task-definition \
-  --family $TASK_FAMILY_NPM \
+aws ecs register-task-definition --family $TASK_FAMILY_NPM \
   --network-mode awsvpc \
   --requires-compatibilities FARGATE \
-  --cpu "256" \
-  --memory "512" \
+  --cpu "256" --memory "512" \
   --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$EXECUTION_ROLE_NAME \
-  --container-definitions '[{"name":"$CONTAINER_NAME_NPM","image":"$IMAGE_URI_NPM","portMappings":[{"containerPort":81}]}]'
+  --container-definitions '[{"name":"'$CONTAINER_NAME_NPM'","image":"'$IMAGE_URI_NPM'","portMappings":[{"containerPort":'$PORT_NPM'}]}]'
+check_error "Failed to register ECS Task Definition for Nginx Proxy Manager"
 
-# Check if NGINX Service exists
-SERVICE_EXISTS_NGINX=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME_NGINX --query 'services[0].status' --output text)
-if [ "$SERVICE_EXISTS_NGINX" != "ACTIVE" ]; then
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for NGINX..."
-  aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NGINX \
-    --task-definition $TASK_FAMILY_NGINX --desired-count 1 \
-    --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
-    --load-balancers "targetGroupArn=$TG_ARN_NGINX,containerName=$CONTAINER_NAME_NGINX,containerPort=$PORT_NGINX"
-  check_error "Failed to create ECS Service for NGINX"
-else
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - ECS Service for NGINX already exists."
-fi
+# Create ECS Service for NGINX
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for NGINX..."
+aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NGINX \
+  --task-definition $TASK_FAMILY_NGINX --desired-count 1 \
+  --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
+  --load-balancers "targetGroupArn=$TG_ARN_NGINX,containerName=$CONTAINER_NAME_NGINX,containerPort=$PORT_NGINX"
+check_error "Failed to create ECS Service for NGINX"
+CREATED_RESOURCES["ECS_SERVICE_NGINX"]=$SERVICE_NAME_NGINX
 
-# Check if Nginx Proxy Manager Service exists
-SERVICE_EXISTS_NPM=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME_NPM --query 'services[0].status' --output text)
-if [ "$SERVICE_EXISTS_NPM" != "ACTIVE" ]; then
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for Nginx Proxy Manager..."
-  aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NPM \
-    --task-definition $TASK_FAMILY_NPM --desired-count 1 \
-    --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
-    --load-balancers "targetGroupArn=$TG_ARN_NPM,containerName=$CONTAINER_NAME_NPM,containerPort=$PORT_NPM"
-  check_error "Failed to create ECS Service for Nginx Proxy Manager"
-else
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - ECS Service for Nginx Proxy Manager already exists."
-fi
+# Create ECS Service for Nginx Proxy Manager
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for Nginx Proxy Manager..."
+aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NPM \
+  --task-definition $TASK_FAMILY_NPM --desired-count 1 \
+  --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
+  --load-balancers "targetGroupArn=$TG_ARN_NPM,containerName=$CONTAINER_NAME_NPM,containerPort=$PORT_NPM"
+check_error "Failed to create ECS Service for Nginx Proxy Manager"
+CREATED_RESOURCES["ECS_SERVICE_NPM"]=$SERVICE_NAME_NPM
+
+# Output Load Balancer DNS
+ALB_DNS=$(aws elbv2 describe-load-balancers --load-balancer-arns $ALB_ARN --query 'LoadBalancers[0].DNSName' --output text)
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment successful! Access your NGINX application at http://$ALB_DNS"
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment successful! Access your Nginx Proxy Manager application at http://$ALB_DNS:$PORT_NPM"
