@@ -204,13 +204,19 @@ aws ec2 describe-security-groups \
   --query 'SecurityGroups[*].{GroupId:GroupId, GroupName:GroupName, EgressRules:IpPermissionsEgress}' \
   --output table
 
-if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissionsEgress[?IpProtocol==`-1` && IpRanges[?CidrIp==`0.0.0.0/0`]]' --output text | grep -q '0.0.0.0/0'; then
+if ! aws ec2 describe-security-groups --group-ids $SG_ID --query "SecurityGroups[0].IpPermissionsEgress[?IpProtocol=='-1'].IpRanges[?CidrIp=='0.0.0.0/0'] | [?CidrIp]" --output text | grep -q '0.0.0.0/0'; then
+  
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Adding egress rule to Security Group..."
-  aws ec2 authorize-security-group-egress --group-id $SG_ID --protocol -1 --cidr 0.0.0.0/0
+  aws ec2 authorize-security-group-egress \
+    --group-id $SG_ID \
+    --protocol -1 \
+    --cidr 0.0.0.0/0
+
   check_error "Failed to set security group egress rules"
 else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Egress rule already exists."
 fi
+
 
 # Create Load Balancer
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Load Balancer..."
