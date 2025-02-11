@@ -334,7 +334,7 @@ NPM_REGISTER_OUTPUT=$(aws ecs register-task-definition \
     {
       \"name\": \"$CONTAINER_NAME_NPM\",
       \"image\": \"$IMAGE_URI_NPM\",
-      \"portMappings\": [{\"containerPort\": $PORT_NPM, \"hostPort\": $PORT_NPM, \"protocol\": \"tcp\"}],
+      \"portMappings\": [{\"containerPort\": $PORT_NGINX, \"hostPort\": $PORT_NPM, \"protocol\": \"tcp\"}],
       \"essential\": true
     }
   ]" 2>&1)
