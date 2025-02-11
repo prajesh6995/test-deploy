@@ -6,9 +6,9 @@ SERVICE_NAME_ME="mongo-express-service"
 SERVICE_NAME_NPM="nginx-proxy-manager-service"
 TASK_FAMILY_NPM="nginx-proxy-manager-task"
 TASK_FAMILY_ME="mongo-express-task"
-CONTAINER_NAME_NGINX="nginx-proxy-manager-container"
+CONTAINER_NAME_NPM="nginx-proxy-manager-container"
 CONTAINER_NAME_ME="mongo-express-container"
-IMAGE_URI_NPM="jc21/nginx-proxy-manager:latest"  # NGINX official image
+IMAGE_URI_NPM="jc21/nginx-proxy-manager:latest"  # NPM official image
 IMAGE_URI_ME="mongo-express"  # Mongo Express image
 PORT_NPM=80
 PORT_ME=8081
@@ -17,7 +17,7 @@ VPC_CIDR="10.0.0.0/16"
 SUBNET_CIDR1="10.0.1.0/24"
 SUBNET_CIDR2="10.0.2.0/24"
 ALB_NAME="ME-NPM-alb"
-TG_NAME_NGINX_PM="NPM-tg"
+TG_NAME_NPM_PM="NPM-tg"
 TG_NAME_ME="mongo-express-tg"
 SG_NAME="ME-NPM-sg"
 EXECUTION_ROLE_NAME="ecsTaskExecutionRole"
@@ -33,9 +33,9 @@ CREATED_RESOURCES=(
   ["SUBNET2"]=""
   ["SG"]=""
   ["ALB"]=""
-  ["TG_NGINX"]=""
   ["TG_NPM"]=""
-  ["ECS_SERVICE_NGINX"]=""
+  ["TG_ME"]=""
+  ["ECS_SERVICE_ME"]=""
   ["ECS_SERVICE_NPM"]=""
 )
 
@@ -79,11 +79,11 @@ rollback() {
           echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleting Load Balancer..."
           aws elbv2 delete-load-balancer --load-balancer-arn ${CREATED_RESOURCES[$resource]}
           ;;
-        "TG_NGINX"|"TG_NPM")
+        "TG_NPM"|"TG_ME")
           echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleting Target Group ${CREATED_RESOURCES[$resource]}..."
           aws elbv2 delete-target-group --target-group-arn ${CREATED_RESOURCES[$resource]}
           ;;
-        "ECS_SERVICE_NGINX"|"ECS_SERVICE_NPM")
+        "ECS_SERVICE_NPM"|"ECS_SERVICE_ME")
           echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleting ECS Service ${CREATED_RESOURCES[$resource]}..."
           aws ecs delete-service --cluster $CLUSTER_NAME --service ${CREATED_RESOURCES[$resource]} --force
           ;;
@@ -185,7 +185,7 @@ SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=$SG_N
 
 if [ "$SG_ID" == "None" ] || [ -z "$SG_ID" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Security Group not found, creating..."
-  SG_ID=$(aws ec2 create-security-group --group-name $SG_NAME --description "Security group for NGINX ALB" --vpc-id $VPC_ID --query 'GroupId' --output text)
+  SG_ID=$(aws ec2 create-security-group --group-name $SG_NAME --description "Security group for NPM ALB" --vpc-id $VPC_ID --query 'GroupId' --output text)
   check_error "Failed to create Security Group"
   CREATED_RESOURCES["SG"]=$SG_ID
 else
@@ -236,21 +236,21 @@ check_error "Failed to create Load Balancer"
 CREATED_RESOURCES["ALB"]=$ALB_ARN
 sleep 30  # Allow time for ALB to become available
 
-# Create Target Group for NGINX with ip target type
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Target Group for NGINX..."
-TG_ARN_NGINX=$(aws elbv2 create-target-group \
-  --name $TG_NAME_NGINX_PM \
+# Create Target Group for NPM with ip target type
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Target Group for NPM..."
+TG_ARN_NPM=$(aws elbv2 create-target-group \
+  --name $TG_NAME_NPM_PM \
   --protocol HTTP \
   --port $PORT_NPM \
   --vpc-id $VPC_ID \
   --target-type ip \
   --query 'TargetGroups[0].TargetGroupArn' \
   --output text)
-check_error "Failed to create Target Group for NGINX"
-CREATED_RESOURCES["TG_NGINX"]=$TG_ARN_NGINX
+check_error "Failed to create Target Group for NPM"
+CREATED_RESOURCES["TG_NPM"]=$TG_ARN_NPM
 
 # Create Target Group for Mongo Express with ip target type
-TG_ARN_NPM=$(aws elbv2 create-target-group \
+TG_ARN_ME=$(aws elbv2 create-target-group \
   --name $TG_NAME_ME \
   --protocol HTTP \
   --port 8081 \
@@ -259,25 +259,25 @@ TG_ARN_NPM=$(aws elbv2 create-target-group \
   --query 'TargetGroups[0].TargetGroupArn' \
   --output text)
 check_error "Failed to create Target Group for Mongo Express"
-CREATED_RESOURCES["TG_NPM"]=$TG_ARN_NPM
+CREATED_RESOURCES["TG_ME"]=$TG_ARN_ME
 
 # Modify health check for Mongo Express
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Configuring health check for mongo express..."
 aws elbv2 modify-target-group \
-  --target-group-arn $TG_ARN_NPM \
+  --target-group-arn $TG_ARN_ME \
   --health-check-path /login \
   --health-check-port 8081 \
   --matcher '{"HttpCode": "200,302,401"}'
 check_error "Failed to configure health check for mongo express"
 
-# Create Listener for NGINX
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Listener for NGINX..."
-aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT_NPM --default-actions Type=forward,TargetGroupArn=$TG_ARN_NGINX
-check_error "Failed to create Listener for NGINX"
+# Create Listener for NPM
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Listener for NPM..."
+aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT_NPM --default-actions Type=forward,TargetGroupArn=$TG_ARN_NPM
+check_error "Failed to create Listener for NPM"
 
 # Create Listener for Mongo Express
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Listener for Mongo Express..."
-aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT_ME --default-actions Type=forward,TargetGroupArn=$TG_ARN_NPM
+aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT_ME --default-actions Type=forward,TargetGroupArn=$TG_ARN_ME
 check_error "Failed to create Listener for Mongo Express"
 
 # Create ECS Task Execution Role
@@ -310,8 +310,8 @@ ROLE_ARN=$(aws iam get-role --role-name $ROLE_NAME --query 'Role.Arn' --output t
 aws iam attach-role-policy --role-name $EXECUTION_ROLE_NAME --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 #check_error "Failed to attach policy to ECS Task Execution Role"
 
-# Register Task Definition for NGINX
-NGINX_REGISTER_OUTPUT=$(aws ecs register-task-definition \
+# Register Task Definition for NPM
+NPM_REGISTER_OUTPUT=$(aws ecs register-task-definition \
   --family $TASK_FAMILY_NPM \
   --network-mode awsvpc \
   --requires-compatibilities FARGATE \
@@ -319,7 +319,7 @@ NGINX_REGISTER_OUTPUT=$(aws ecs register-task-definition \
   --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$EXECUTION_ROLE_NAME \
   --container-definitions "[
     {
-      \"name\": \"$CONTAINER_NAME_NGINX\",
+      \"name\": \"$CONTAINER_NAME_NPM\",
       \"image\": \"$IMAGE_URI_NPM\",
       \"portMappings\": [{\"containerPort\": $PORT_NPM, \"hostPort\": $PORT_NPM, \"protocol\": \"tcp\"}],
       \"essential\": true
@@ -327,12 +327,12 @@ NGINX_REGISTER_OUTPUT=$(aws ecs register-task-definition \
   ]" 2>&1)
 
 if [ $? -ne 0 ]; then
-  echo "Failed to register task definition for NGINX. Error: $NGINX_REGISTER_OUTPUT"
+  echo "Failed to register task definition for NPM. Error: $NPM_REGISTER_OUTPUT"
   exit 1
 fi
 
 # Register Task Definition for Mongo Express
-NPM_REGISTER_OUTPUT=$(aws ecs register-task-definition \
+ME_REGISTER_OUTPUT=$(aws ecs register-task-definition \
   --family $TASK_FAMILY_ME \
   --network-mode awsvpc \
   --requires-compatibilities FARGATE \
@@ -348,40 +348,40 @@ NPM_REGISTER_OUTPUT=$(aws ecs register-task-definition \
   ]" 2>&1)
 
 if [ $? -ne 0 ]; then
-  echo "Failed to register task definition for Mongo Express. Error: $NPM_REGISTER_OUTPUT"
+  echo "Failed to register task definition for Mongo Express. Error: $ME_REGISTER_OUTPUT"
   exit 1
 fi
 
 
-# Create ECS Service for NGINX
-SERVICE_STATUS_NGINX=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME_ME --query 'services[0].status' --output text 2>&1)
-
-if [ "$SERVICE_STATUS_NGINX" != "ACTIVE" ]; then
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for NGINX..."
-  NGINX_SERVICE_OUTPUT=$(aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_ME \
-    --task-definition $TASK_FAMILY_NPM --desired-count 1 \
-    --launch-type FARGATE \
-    --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
-    --load-balancers "targetGroupArn=$TG_ARN_NGINX,containerName=$CONTAINER_NAME_NGINX,containerPort=$PORT_NPM" \
-    --query "service.serviceName" --output text 2>&1)
-
-  if [ $? -ne 0 ]; then
-    echo "Failed to create ECS Service for NGINX. Error: $NGINX_SERVICE_OUTPUT"
-    exit 1
-  else
-    echo "ECS Service for NGINX created successfully: $NGINX_SERVICE_OUTPUT"
-  fi
-else
-  echo "ECS Service for NGINX already exists and is active."
-fi
-CREATED_RESOURCES["ECS_SERVICE_NGINX"]=$SERVICE_NAME_ME
-
-# Create ECS Service for Mongo Express
+# Create ECS Service for NPM
 SERVICE_STATUS_NPM=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME_NPM --query 'services[0].status' --output text 2>&1)
 
 if [ "$SERVICE_STATUS_NPM" != "ACTIVE" ]; then
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for Mongo Express..."
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for NPM..."
   NPM_SERVICE_OUTPUT=$(aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NPM \
+    --task-definition $TASK_FAMILY_NPM --desired-count 1 \
+    --launch-type FARGATE \
+    --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
+    --load-balancers "targetGroupArn=$TG_ARN_NPM,containerName=$CONTAINER_NAME_NPM,containerPort=$PORT_NPM" \
+    --query "service.serviceName" --output text 2>&1)
+
+  if [ $? -ne 0 ]; then
+    echo "Failed to create ECS Service for NPM. Error: $NPM_SERVICE_OUTPUT"
+    exit 1
+  else
+    echo "ECS Service for NPM created successfully: $NPM_SERVICE_OUTPUT"
+  fi
+else
+  echo "ECS Service for NPM already exists and is active."
+fi
+CREATED_RESOURCES["ECS_SERVICE_NPM"]=$SERVICE_NAME_NPM
+
+# Create ECS Service for Mongo Express
+SERVICE_STATUS_ME=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME_ME --query 'services[0].status' --output text 2>&1)
+
+if [ "$SERVICE_STATUS_ME" != "ACTIVE" ]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for Mongo Express..."
+  ME_SERVICE_OUTPUT=$(aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_ME \
     --task-definition $TASK_FAMILY_ME --desired-count 1 \
     --launch-type FARGATE \
     --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
@@ -389,17 +389,17 @@ if [ "$SERVICE_STATUS_NPM" != "ACTIVE" ]; then
     --query "service.serviceName" --output text 2>&1)
 
   if [ $? -ne 0 ]; then
-    echo "Failed to create ECS Service for Mongo Express. Error: $NPM_SERVICE_OUTPUT"
+    echo "Failed to create ECS Service for Mongo Express. Error: $ME_SERVICE_OUTPUT"
     exit 1
   else
-    echo "ECS Service for Mongo Express created successfully: $NPM_SERVICE_OUTPUT"
+    echo "ECS Service for Mongo Express created successfully: $ME_SERVICE_OUTPUT"
   fi
 else
   echo "ECS Service for Mongo Express already exists and is active."
 fi
-CREATED_RESOURCES["ECS_SERVICE_NPM"]=$SERVICE_NAME_NPM
+CREATED_RESOURCES["ECS_SERVICE_ME"]=$SERVICE_NAME_ME
 
 # Output Load Balancer DNS
 ALB_DNS=$(aws elbv2 describe-load-balancers --load-balancer-arns $ALB_ARN --query 'LoadBalancers[0].DNSName' --output text)
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment successful! Access your NGINX application at http://$ALB_DNS"
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment successful! Access your NPM application at http://$ALB_DNS"
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment successful! Access your Mongo Express application at http://$ALB_DNS:$PORT_ME"
