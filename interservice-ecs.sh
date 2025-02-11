@@ -197,7 +197,13 @@ else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Ingress rule already exists."
 fi
 
+
 # Set Egress Rule if not exists
+
+aws ec2 describe-security-groups \
+  --query 'SecurityGroups[*].{GroupId:GroupId, GroupName:GroupName, EgressRules:IpPermissionsEgress}' \
+  --output table
+
 if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissionsEgress[?IpProtocol==`-1` && IpRanges[?CidrIp==`0.0.0.0/0`]]' --output text | grep -q '0.0.0.0/0'; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Adding egress rule to Security Group..."
   aws ec2 authorize-security-group-egress --group-id $SG_ID --protocol -1 --cidr 0.0.0.0/0
