@@ -213,7 +213,21 @@ check_error "Failed to create Service Discovery Namespace"
 
 # Wait for the namespace to be created
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Waiting for Service Discovery Namespace to be created..."
-aws servicediscovery get-operation --operation-id $NAMESPACE_ID --query 'Operation.Status' --output text
+while true; do
+  NAMESPACE_STATUS=$(aws servicediscovery get-operation --operation-id $NAMESPACE_ID --query 'Operation.Status' --output text)
+  if [ "$NAMESPACE_STATUS" == "SUCCESS" ]; then
+    NAMESPACE_ARN=$(aws servicediscovery list-namespaces --query "Namespaces[?Name=='$NAMESPACE_NAME'].Arn" --output text)
+    NAMESPACE_ID=$(aws servicediscovery list-namespaces --query "Namespaces[?Name=='$NAMESPACE_NAME'].Id" --output text)
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Namespace created successfully with ID: $NAMESPACE_ID"
+    break
+  elif [ "$NAMESPACE_STATUS" == "FAIL" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Namespace creation failed."
+    exit 1
+  else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Namespace creation in progress..."
+    sleep 10
+  fi
+done
 CREATED_RESOURCES["NAMESPACE"]=$NAMESPACE_ID
 
 # Create Service Discovery Services
