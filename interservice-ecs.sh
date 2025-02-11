@@ -10,8 +10,8 @@ CONTAINER_NAME_NGINX="nginx-container"
 CONTAINER_NAME_NPM="nginx-proxy-manager-container"
 IMAGE_URI_NGINX="nginx:latest"  # NGINX official image
 IMAGE_URI_NPM="jc21/nginx-proxy-manager:latest"  # Nginx Proxy Manager image
-PORT_NGINX=80
-PORT_NPM=8080
+PORT_NGINX=8080
+PORT_NPM=8085
 REGION="us-east-1"
 VPC_CIDR="10.0.0.0/16"
 SUBNET_CIDR1="10.0.1.0/24"
@@ -196,11 +196,11 @@ echo "SG_ID: $SG_ID"
 aws ec2 describe-security-groups --query 'SecurityGroups[*].[GroupId, GroupName, Description, VpcId]' --output table
 
 # Set Ingress Rule if not exists
-if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissions[?FromPort==`80` && ToPort==`80` && IpProtocol==`tcp`]' --output text | grep -q '0.0.0.0/0'; then
+if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissions[?FromPort==`8000` && ToPort==`24000` && IpProtocol==`tcp`]' --output text | grep -q '0.0.0.0/0'; then
   aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT_NGINX --cidr 0.0.0.0/0
-  check_error "Failed to set security group ingress rules"
+  #check_error "Failed to set security group ingress rules"
   aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT_NPM --cidr 0.0.0.0/0
-  check_error "Failed to set security group ingress rules"
+  #check_error "Failed to set security group ingress rules"
 else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Ingress rule already exists."
 fi
@@ -253,7 +253,7 @@ CREATED_RESOURCES["TG_NGINX"]=$TG_ARN_NGINX
 TG_ARN_NPM=$(aws elbv2 create-target-group \
   --name $TG_NAME_NPM \
   --protocol HTTP \
-  --port 8080 \
+  --port 8085 \
   --vpc-id $VPC_ID \
   --target-type ip \
   --query 'TargetGroups[0].TargetGroupArn' \
@@ -266,7 +266,7 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') - Configuring health check for Nginx Proxy Ma
 aws elbv2 modify-target-group \
   --target-group-arn $TG_ARN_NPM \
   --health-check-path /login \
-  --health-check-port 8080 \
+  --health-check-port 8085 \
   --matcher '{"HttpCode": "200,302,401"}'
 check_error "Failed to configure health check for Nginx Proxy Manager"
 
