@@ -11,7 +11,7 @@ CONTAINER_NAME_NPM="nginx-proxy-manager-container"
 IMAGE_URI_NGINX="nginx:latest"  # NGINX official image
 IMAGE_URI_NPM="jc21/nginx-proxy-manager:latest"  # Nginx Proxy Manager image
 PORT_NGINX=80
-PORT_NPM=81
+PORT_NPM=80
 REGION="us-east-1"
 VPC_CIDR="10.0.0.0/16"
 SUBNET_CIDR1="10.0.1.0/24"
@@ -253,7 +253,7 @@ CREATED_RESOURCES["TG_NGINX"]=$TG_ARN_NGINX
 TG_ARN_NPM=$(aws elbv2 create-target-group \
   --name $TG_NAME_NPM \
   --protocol HTTP \
-  --port $PORT_NPM \
+  --port 80 \
   --vpc-id $VPC_ID \
   --target-type ip \
   --query 'TargetGroups[0].TargetGroupArn' \
@@ -261,6 +261,14 @@ TG_ARN_NPM=$(aws elbv2 create-target-group \
 check_error "Failed to create Target Group for Nginx Proxy Manager"
 CREATED_RESOURCES["TG_NPM"]=$TG_ARN_NPM
 
+# Modify health check for Nginx Proxy Manager
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Configuring health check for Nginx Proxy Manager..."
+aws elbv2 modify-target-group \
+  --target-group-arn $TG_ARN_NPM \
+  --health-check-path /login \
+  --health-check-port 80 \
+  --matcher HttpCode=200,302,401
+check_error "Failed to configure health check for Nginx Proxy Manager"
 
 # Create Listener for NGINX
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Listener for NGINX..."
@@ -334,7 +342,7 @@ NPM_REGISTER_OUTPUT=$(aws ecs register-task-definition \
     {
       \"name\": \"$CONTAINER_NAME_NPM\",
       \"image\": \"$IMAGE_URI_NPM\",
-      \"portMappings\": [{\"containerPort\": $PORT_NGINX, \"hostPort\": $PORT_NPM, \"protocol\": \"tcp\"}],
+      \"portMappings\": [{\"containerPort\": $PORT_NPM, \"hostPort\": $PORT_NPM, \"protocol\": \"tcp\"}],
       \"essential\": true
     }
   ]" 2>&1)
@@ -343,6 +351,7 @@ if [ $? -ne 0 ]; then
   echo "Failed to register task definition for Nginx Proxy Manager. Error: $NPM_REGISTER_OUTPUT"
   exit 1
 fi
+
 
 
 # Create ECS Service for NGINX
