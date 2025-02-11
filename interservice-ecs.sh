@@ -174,7 +174,6 @@ echo "SG_NAME: $SG_NAME"
 echo "VPC_ID: $VPC_ID"
 
 SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=$SG_NAME" "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text)
-echo "SG_ID: $SG_ID"
 
 if [ "$SG_ID" == "None" ] || [ -z "$SG_ID" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Security Group not found, creating..."
@@ -184,6 +183,7 @@ if [ "$SG_ID" == "None" ] || [ -z "$SG_ID" ]; then
 else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Security Group already exists with ID $SG_ID."
 fi
+echo "SG_ID: $SG_ID"
 
 aws ec2 describe-security-groups --query 'SecurityGroups[*].[GroupId, GroupName, Description, VpcId]' --output table
 
@@ -205,7 +205,7 @@ aws ec2 describe-security-groups \
   --output table
 
 if ! aws ec2 describe-security-groups --group-ids $SG_ID --query "SecurityGroups[0].IpPermissionsEgress[?IpProtocol=='-1'].IpRanges[?CidrIp=='0.0.0.0/0'] | [?CidrIp]" --output text | grep -q '0.0.0.0/0'; then
-  
+
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Adding egress rule to Security Group..."
   aws ec2 authorize-security-group-egress \
     --group-id $SG_ID \
