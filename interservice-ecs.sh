@@ -250,7 +250,6 @@ check_error "Failed to create Target Group for NGINX"
 CREATED_RESOURCES["TG_NGINX"]=$TG_ARN_NGINX
 
 # Create Target Group for Nginx Proxy Manager with ip target type
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Target Group for Nginx Proxy Manager..."
 TG_ARN_NPM=$(aws elbv2 create-target-group \
   --name $TG_NAME_NPM \
   --protocol HTTP \
@@ -303,47 +302,41 @@ ROLE_ARN=$(aws iam get-role --role-name $ROLE_NAME --query 'Role.Arn' --output t
 aws iam attach-role-policy --role-name $EXECUTION_ROLE_NAME --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 check_error "Failed to attach policy to ECS Task Execution Role"
 
-# Register ECS Task Definition for NGINX
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Registering ECS Task Definition for NGINX..."
-aws ecs register-task-definition --family $TASK_FAMILY_NGINX \
+# Register Task Definition for NGINX
+aws ecs register-task-definition \
+  --family $TASK_FAMILY_NGINX \
   --network-mode awsvpc \
   --requires-compatibilities FARGATE \
   --cpu "256" --memory "512" \
   --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$EXECUTION_ROLE_NAME \
-  --container-definitions '[{
-    "name": "'$CONTAINER_NAME_NGINX'",
-    "image": "'$IMAGE_URI_NGINX'",
-    "portMappings": [
-      {
-        "containerPort": '$PORT_NGINX',
-        "hostPort": '$PORT_NGINX',
-        "protocol": "tcp"
-      }
-    ],
-    "essential": true
-  }]'
-check_error "Failed to register ECS Task Definition for NGINX"
+  --task-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$TASK_ROLE_NAME \
+  --container-definitions "[
+    {
+      \"name\": \"$CONTAINER_NAME_NGINX\",
+      \"image\": \"$IMAGE_URI_NGINX\",
+      \"portMappings\": [{\"containerPort\": $PORT_NGINX, \"hostPort\": $PORT_NGINX, \"protocol\": \"tcp\"}],
+      \"essential\": true
+    }
+  ]"
+check_error "Failed to register task definition for NGINX"
 
-# Register ECS Task Definition for Nginx Proxy Manager
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Registering ECS Task Definition for Nginx Proxy Manager..."
-aws ecs register-task-definition --family $TASK_FAMILY_NPM \
+# Register Task Definition for Nginx Proxy Manager
+aws ecs register-task-definition \
+  --family $TASK_FAMILY_NPM \
   --network-mode awsvpc \
   --requires-compatibilities FARGATE \
   --cpu "256" --memory "512" \
   --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$EXECUTION_ROLE_NAME \
-  --container-definitions '[{
-    "name": "'$CONTAINER_NAME_NPM'",
-    "image": "'$IMAGE_URI_NPM'",
-    "portMappings": [
-      {
-        "containerPort": '$PORT_NPM',
-        "hostPort": '$PORT_NPM',
-        "protocol": "tcp"
-      }
-    ],
-    "essential": true
-  }]'
-check_error "Failed to register ECS Task Definition for Nginx Proxy Manager"
+  --task-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$TASK_ROLE_NAME \
+  --container-definitions "[
+    {
+      \"name\": \"$CONTAINER_NAME_NPM\",
+      \"image\": \"$IMAGE_URI_NPM\",
+      \"portMappings\": [{\"containerPort\": $PORT_NPM, \"hostPort\": $PORT_NPM, \"protocol\": \"tcp\"}],
+      \"essential\": true
+    }
+  ]"
+check_error "Failed to register task definition for Nginx Proxy Manager"
 
 
 # Create ECS Service for NGINX
@@ -369,6 +362,7 @@ aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NPM 
 
 check_error "Failed to create ECS Service for Nginx Proxy Manager"
 CREATED_RESOURCES["ECS_SERVICE_NPM"]=$SERVICE_NAME_NPM
+
 
 
 
