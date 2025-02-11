@@ -300,10 +300,10 @@ ROLE_ARN=$(aws iam get-role --role-name $ROLE_NAME --query 'Role.Arn' --output t
 
 # Attach AmazonECSTaskExecutionRolePolicy to the execution role
 aws iam attach-role-policy --role-name $EXECUTION_ROLE_NAME --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-check_error "Failed to attach policy to ECS Task Execution Role"
+#check_error "Failed to attach policy to ECS Task Execution Role"
 
 # Register Task Definition for NGINX
-aws ecs register-task-definition \
+NGINX_REGISTER_OUTPUT=$(aws ecs register-task-definition \
   --family $TASK_FAMILY_NGINX \
   --network-mode awsvpc \
   --requires-compatibilities FARGATE \
@@ -317,11 +317,15 @@ aws ecs register-task-definition \
       \"portMappings\": [{\"containerPort\": $PORT_NGINX, \"hostPort\": $PORT_NGINX, \"protocol\": \"tcp\"}],
       \"essential\": true
     }
-  ]"
-check_error "Failed to register task definition for NGINX"
+  ]" 2>&1)
+
+if [ $? -ne 0 ]; then
+  echo "Failed to register task definition for NGINX. Error: $NGINX_REGISTER_OUTPUT"
+  exit 1
+fi
 
 # Register Task Definition for Nginx Proxy Manager
-aws ecs register-task-definition \
+NPM_REGISTER_OUTPUT=$(aws ecs register-task-definition \
   --family $TASK_FAMILY_NPM \
   --network-mode awsvpc \
   --requires-compatibilities FARGATE \
@@ -335,33 +339,48 @@ aws ecs register-task-definition \
       \"portMappings\": [{\"containerPort\": $PORT_NPM, \"hostPort\": $PORT_NPM, \"protocol\": \"tcp\"}],
       \"essential\": true
     }
-  ]"
-check_error "Failed to register task definition for Nginx Proxy Manager"
+  ]" 2>&1)
+
+if [ $? -ne 0 ]; then
+  echo "Failed to register task definition for Nginx Proxy Manager. Error: $NPM_REGISTER_OUTPUT"
+  exit 1
+fi
 
 
 # Create ECS Service for NGINX
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for NGINX..."
-aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NGINX \
+NGINX_SERVICE_OUTPUT=$(aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NGINX \
   --task-definition $TASK_FAMILY_NGINX --desired-count 1 \
   --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
   --load-balancers "targetGroupArn=$TG_ARN_NGINX,containerName=$CONTAINER_NAME_NGINX,containerPort=$PORT_NGINX" \
-  --query "service.serviceName" --output text
+  --query "service.serviceName" --output text 2>&1)
 
-check_error "Failed to create ECS Service for NGINX"
+if [ $? -ne 0 ]; then
+  echo "Failed to create ECS Service for NGINX. Error: $NGINX_SERVICE_OUTPUT"
+  exit 1
+else
+  echo "ECS Service for NGINX created successfully: $NGINX_SERVICE_OUTPUT"
+fi
 CREATED_RESOURCES["ECS_SERVICE_NGINX"]=$SERVICE_NAME_NGINX
 
 # Create ECS Service for Nginx Proxy Manager
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for Nginx Proxy Manager..."
-aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NPM \
+NPM_SERVICE_OUTPUT=$(aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NPM \
   --task-definition $TASK_FAMILY_NPM --desired-count 1 \
   --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
   --load-balancers "targetGroupArn=$TG_ARN_NPM,containerName=$CONTAINER_NAME_NPM,containerPort=$PORT_NPM" \
-  --query "service.serviceName" --output text
+  --query "service.serviceName" --output text 2>&1)
 
-check_error "Failed to create ECS Service for Nginx Proxy Manager"
+if [ $? -ne 0 ]; then
+  echo "Failed to create ECS Service for Nginx Proxy Manager. Error: $NPM_SERVICE_OUTPUT"
+  exit 1
+else
+  echo "ECS Service for Nginx Proxy Manager created successfully: $NPM_SERVICE_OUTPUT"
+fi
 CREATED_RESOURCES["ECS_SERVICE_NPM"]=$SERVICE_NAME_NPM
+
 
 
 
