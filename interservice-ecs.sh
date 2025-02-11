@@ -5,20 +5,20 @@ CLUSTER_NAME="nginx-cluster"
 SERVICE_NAME_NGINX="nginx-service"
 SERVICE_NAME_NPM="nginx-proxy-manager-service"
 TASK_FAMILY_NGINX="nginx-task"
-TASK_FAMILY_NPM="nginx-proxy-manager-task"
+TASK_FAMILY_ME="nginx-proxy-manager-task"
 CONTAINER_NAME_NGINX="nginx-container"
-CONTAINER_NAME_NPM="nginx-proxy-manager-container"
+CONTAINER_NAME_ME="mongo-express-container"
 IMAGE_URI_NGINX="nginx:latest"  # NGINX official image
-IMAGE_URI_NPM="jc21/nginx-proxy-manager:latest"  # Nginx Proxy Manager image
-PORT_NGINX=8080
-PORT_NPM=8085
+IMAGE_URI_NPM="mongo-express"  # Mongo Express image
+PORT_NGINX=80
+PORT_ME=8081
 REGION="us-east-1"
 VPC_CIDR="10.0.0.0/16"
 SUBNET_CIDR1="10.0.1.0/24"
 SUBNET_CIDR2="10.0.2.0/24"
 ALB_NAME="nginx-alb"
 TG_NAME_NGINX="nginx-tg"
-TG_NAME_NPM="nginx-proxy-manager-tg"
+TG_NAME_NPM="mongo-express-tg"
 SG_NAME="nginx-sg"
 EXECUTION_ROLE_NAME="ecsTaskExecutionRole"
 TASK_ROLE_NAME="ecsTaskRole"
@@ -199,7 +199,7 @@ aws ec2 describe-security-groups --query 'SecurityGroups[*].[GroupId, GroupName,
 if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissions[?FromPort==`8000` && ToPort==`24000` && IpProtocol==`tcp`]' --output text | grep -q '0.0.0.0/0'; then
   aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT_NGINX --cidr 0.0.0.0/0
   #check_error "Failed to set security group ingress rules"
-  aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT_NPM --cidr 0.0.0.0/0
+  aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT_ME --cidr 0.0.0.0/0
   #check_error "Failed to set security group ingress rules"
 else
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Ingress rule already exists."
@@ -249,36 +249,36 @@ TG_ARN_NGINX=$(aws elbv2 create-target-group \
 check_error "Failed to create Target Group for NGINX"
 CREATED_RESOURCES["TG_NGINX"]=$TG_ARN_NGINX
 
-# Create Target Group for Nginx Proxy Manager with ip target type
+# Create Target Group for Mongo Express with ip target type
 TG_ARN_NPM=$(aws elbv2 create-target-group \
   --name $TG_NAME_NPM \
   --protocol HTTP \
-  --port 8085 \
+  --port 8081 \
   --vpc-id $VPC_ID \
   --target-type ip \
   --query 'TargetGroups[0].TargetGroupArn' \
   --output text)
-check_error "Failed to create Target Group for Nginx Proxy Manager"
+check_error "Failed to create Target Group for Mongo Express"
 CREATED_RESOURCES["TG_NPM"]=$TG_ARN_NPM
 
-# Modify health check for Nginx Proxy Manager
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Configuring health check for Nginx Proxy Manager..."
+# Modify health check for Mongo Express
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Configuring health check for mongo express..."
 aws elbv2 modify-target-group \
   --target-group-arn $TG_ARN_NPM \
   --health-check-path /login \
-  --health-check-port 8085 \
+  --health-check-port 8081 \
   --matcher '{"HttpCode": "200,302,401"}'
-check_error "Failed to configure health check for Nginx Proxy Manager"
+check_error "Failed to configure health check for mongo express"
 
 # Create Listener for NGINX
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Listener for NGINX..."
 aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT_NGINX --default-actions Type=forward,TargetGroupArn=$TG_ARN_NGINX
 check_error "Failed to create Listener for NGINX"
 
-# Create Listener for Nginx Proxy Manager
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Listener for Nginx Proxy Manager..."
-aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT_NPM --default-actions Type=forward,TargetGroupArn=$TG_ARN_NPM
-check_error "Failed to create Listener for Nginx Proxy Manager"
+# Create Listener for Mongo Express
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Listener for Mongo Express..."
+aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT_ME --default-actions Type=forward,TargetGroupArn=$TG_ARN_NPM
+check_error "Failed to create Listener for Mongo Express"
 
 # Create ECS Task Execution Role
 # Check and Create IAM Role for ECS Task Execution
@@ -331,27 +331,26 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-# Register Task Definition for Nginx Proxy Manager
+# Register Task Definition for Mongo Express
 NPM_REGISTER_OUTPUT=$(aws ecs register-task-definition \
-  --family $TASK_FAMILY_NPM \
+  --family $TASK_FAMILY_ME \
   --network-mode awsvpc \
   --requires-compatibilities FARGATE \
   --cpu "256" --memory "512" \
   --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/$EXECUTION_ROLE_NAME \
   --container-definitions "[
     {
-      \"name\": \"$CONTAINER_NAME_NPM\",
+      \"name\": \"$CONTAINER_NAME_ME\",
       \"image\": \"$IMAGE_URI_NPM\",
-      \"portMappings\": [{\"containerPort\": $PORT_NPM, \"hostPort\": $PORT_NPM, \"protocol\": \"tcp\"}],
+      \"portMappings\": [{\"containerPort\": $PORT_ME, \"hostPort\": $PORT_ME, \"protocol\": \"tcp\"}],
       \"essential\": true
     }
   ]" 2>&1)
 
 if [ $? -ne 0 ]; then
-  echo "Failed to register task definition for Nginx Proxy Manager. Error: $NPM_REGISTER_OUTPUT"
+  echo "Failed to register task definition for Mongo Express. Error: $NPM_REGISTER_OUTPUT"
   exit 1
 fi
-
 
 
 # Create ECS Service for NGINX
@@ -377,30 +376,30 @@ else
 fi
 CREATED_RESOURCES["ECS_SERVICE_NGINX"]=$SERVICE_NAME_NGINX
 
-# Create ECS Service for Nginx Proxy Manager
+# Create ECS Service for Mongo Express
 SERVICE_STATUS_NPM=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME_NPM --query 'services[0].status' --output text 2>&1)
 
 if [ "$SERVICE_STATUS_NPM" != "ACTIVE" ]; then
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for Nginx Proxy Manager..."
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for Mongo Express..."
   NPM_SERVICE_OUTPUT=$(aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NPM \
-    --task-definition $TASK_FAMILY_NPM --desired-count 1 \
+    --task-definition $TASK_FAMILY_ME --desired-count 1 \
     --launch-type FARGATE \
     --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
-    --load-balancers "targetGroupArn=$TG_ARN_NPM,containerName=$CONTAINER_NAME_NPM,containerPort=$PORT_NPM" \
+    --load-balancers "targetGroupArn=$TG_ARN_NPM,containerName=$CONTAINER_NAME_ME,containerPort=$PORT_ME" \
     --query "service.serviceName" --output text 2>&1)
 
   if [ $? -ne 0 ]; then
-    echo "Failed to create ECS Service for Nginx Proxy Manager. Error: $NPM_SERVICE_OUTPUT"
+    echo "Failed to create ECS Service for Mongo Express. Error: $NPM_SERVICE_OUTPUT"
     exit 1
   else
-    echo "ECS Service for Nginx Proxy Manager created successfully: $NPM_SERVICE_OUTPUT"
+    echo "ECS Service for Mongo Express created successfully: $NPM_SERVICE_OUTPUT"
   fi
 else
-  echo "ECS Service for Nginx Proxy Manager already exists and is active."
+  echo "ECS Service for Mongo Express already exists and is active."
 fi
 CREATED_RESOURCES["ECS_SERVICE_NPM"]=$SERVICE_NAME_NPM
 
 # Output Load Balancer DNS
 ALB_DNS=$(aws elbv2 describe-load-balancers --load-balancer-arns $ALB_ARN --query 'LoadBalancers[0].DNSName' --output text)
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment successful! Access your NGINX application at http://$ALB_DNS"
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment successful! Access your Nginx Proxy Manager application at http://$ALB_DNS:$PORT_NPM"
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment successful! Access your Mongo Express application at http://$ALB_DNS:$PORT_ME"
