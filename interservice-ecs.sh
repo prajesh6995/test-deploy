@@ -91,6 +91,117 @@ rollback() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Rollback complete."
 }
 
+# Create VPC
+if ! aws ec2 describe-vpcs --filters "Name=cidr-block,Values=$VPC_CIDR" --query 'Vpcs[0].VpcId' --output text | grep -q 'vpc-'; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating VPC..."
+  VPC_ID=$(aws ec2 create-vpc --cidr-block $VPC_CIDR --query 'Vpc.VpcId' --output text)
+  check_error "Failed to create VPC"
+  CREATED_RESOURCES["VPC"]=$VPC_ID
+else
+  VPC_ID=$(aws ec2 describe-vpcs --filters "Name=cidr-block,Values=$VPC_CIDR" --query 'Vpcs[0].VpcId' --output text)
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - VPC already exists with ID $VPC_ID."
+fi
+
+# Enable public DNS hostname for VPC
+aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-support '{"Value":true}'
+aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-hostnames '{"Value":true}'
+
+# Create and attach Internet Gateway
+if ! aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$VPC_ID" --query 'InternetGateways[0].InternetGatewayId' --output text | grep -q 'igw-'; then
+  IGW_ID=$(aws ec2 create-internet-gateway --query 'InternetGateway.InternetGatewayId' --output text)
+  check_error "Failed to create Internet Gateway"
+  aws ec2 attach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID
+  check_error "Failed to attach Internet Gateway"
+  CREATED_RESOURCES["IGW"]=$IGW_ID
+else
+  IGW_ID=$(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$VPC_ID" --query 'InternetGateways[0].InternetGatewayId' --output text)
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Internet Gateway already attached with ID $IGW_ID."
+fi
+
+# Create Route Table and associate with subnets
+ROUTE_TABLE_ID=$(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" --query 'RouteTables[0].RouteTableId' --output text)
+if ! aws ec2 describe-route-tables --route-table-ids $ROUTE_TABLE_ID --query 'Routes[?DestinationCidrBlock==`0.0.0.0/0`]' --output text | grep -q '0.0.0.0/0'; then
+  aws ec2 create-route --route-table-id $ROUTE_TABLE_ID --destination-cidr-block 0.0.0.0/0 --gateway-id $IGW_ID
+  check_error "Failed to create route to Internet Gateway"
+else
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Route to Internet Gateway already exists."
+fi
+
+# Create Subnets in Different AZs
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Subnet 1 in $AZ1..."
+SUBNET_ID1=$(aws ec2 describe-subnets --filters "Name=cidr-block,Values=$SUBNET_CIDR1" --query 'Subnets[0].SubnetId' --output text)
+if [ -z "$SUBNET_ID1" ]; then
+  SUBNET_ID1=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block $SUBNET_CIDR1 --availability-zone $AZ1 --query 'Subnet.SubnetId' --output text)
+  check_error "Failed to create Subnet 1"
+  aws ec2 associate-route-table --subnet-id $SUBNET_ID1 --route-table-id $ROUTE_TABLE_ID
+  aws ec2 modify-subnet-attribute --subnet-id $SUBNET_ID1 --map-public-ip-on-launch
+  CREATED_RESOURCES["SUBNET1"]=$SUBNET_ID1
+else
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Subnet 1 already exists with ID $SUBNET_ID1."
+fi
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Subnet 2 in $AZ2..."
+SUBNET_ID2=$(aws ec2 describe-subnets --filters "Name=cidr-block,Values=$SUBNET_CIDR2" --query 'Subnets[0].SubnetId' --output text)
+if [ -z "$SUBNET_ID2" ]; then
+  SUBNET_ID2=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block $SUBNET_CIDR2 --availability-zone $AZ2 --query 'Subnet.SubnetId' --output text)
+  check_error "Failed to create Subnet 2"
+  aws ec2 associate-route-table --subnet-id $SUBNET_ID2 --route-table-id $ROUTE_TABLE_ID
+  aws ec2 modify-subnet-attribute --subnet-id $SUBNET_ID2 --map-public-ip-on-launch
+  CREATED_RESOURCES["SUBNET2"]=$SUBNET_ID2
+else
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Subnet 2 already exists with ID $SUBNET_ID2."
+fi
+
+# Create Security Group
+echo "SG_NAME: $SG_NAME"
+echo "VPC_ID: $VPC_ID"
+
+SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=$SG_NAME" "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text)
+
+if [ "$SG_ID" == "None" ] || [ -z "$SG_ID" ]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Security Group not found, creating..."
+  SG_ID=$(aws ec2 create-security-group --group-name $SG_NAME --description "Security group for NGINX ALB" --vpc-id $VPC_ID --query 'GroupId' --output text)
+  check_error "Failed to create Security Group"
+  CREATED_RESOURCES["SG"]=$SG_ID
+else
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Security Group already exists with ID $SG_ID."
+fi
+echo "SG_ID: $SG_ID"
+
+aws ec2 describe-security-groups --query 'SecurityGroups[*].[GroupId, GroupName, Description, VpcId]' --output table
+
+# Set Ingress Rule if not exists
+if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissions[?FromPort==`8000` && ToPort==`24000` && IpProtocol==`tcp`]' --output text | grep -q '0.0.0.0/0'; then
+  aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT_NGINX --cidr 0.0.0.0/0
+  #check_error "Failed to set security group ingress rules"
+  aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT_NPM --cidr 0.0.0.0/0
+  #check_error "Failed to set security group ingress rules"
+else
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Ingress rule already exists."
+fi
+
+
+# Set Egress Rule if not exists
+
+aws ec2 describe-security-groups \
+  --query 'SecurityGroups[*].{GroupId:GroupId, GroupName:GroupName, EgressRules:IpPermissionsEgress}' \
+  --output table
+
+# Check if the egress rule already exists for the specific Security Group
+EXISTING_EGRESS=$(aws ec2 describe-security-groups --group-ids $SG_ID --query "SecurityGroups[0].IpPermissionsEgress[?IpProtocol=='-1'].[IpRanges]" --output text)
+
+echo "EXISTING_EGRESS : $EXISTING_EGRESS "
+
+# Check if the rule already exists by verifying if 0.0.0.0/0 is present
+if echo "$EXISTING_EGRESS" | grep -q '0.0.0.0/0'; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Egress rule already exists."
+else
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Adding egress rule to Security Group..."
+  aws ec2 authorize-security-group-egress --group-id $SG_ID --protocol -1 --cidr 0.0.0.0/0
+
+  check_error "Failed to set security group egress rules"
+fi
+
 # Create a Service Discovery Namespace
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Service Discovery Namespace..."
 NAMESPACE_ID=$(aws servicediscovery create-private-dns-namespace \
