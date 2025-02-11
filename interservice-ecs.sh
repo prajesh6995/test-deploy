@@ -1,25 +1,25 @@
 #!/bin/bash
 
 # Set variables
-CLUSTER_NAME="nginx-cluster"
-SERVICE_NAME_NGINX="nginx-service"
+CLUSTER_NAME="me-npm-cluster"
+SERVICE_NAME_ME="mongo-express-service"
 SERVICE_NAME_NPM="nginx-proxy-manager-service"
-TASK_FAMILY_NGINX="nginx-task"
-TASK_FAMILY_ME="nginx-proxy-manager-task"
-CONTAINER_NAME_NGINX="nginx-container"
+TASK_FAMILY_NPM="nginx-proxy-manager-task"
+TASK_FAMILY_ME="mongo-express-task"
+CONTAINER_NAME_NGINX="nginx-proxy-manager-container"
 CONTAINER_NAME_ME="mongo-express-container"
-IMAGE_URI_NGINX="nginx:latest"  # NGINX official image
-IMAGE_URI_NPM="mongo-express"  # Mongo Express image
-PORT_NGINX=80
+IMAGE_URI_NPM="jc21/nginx-proxy-manager:latest"  # NGINX official image
+IMAGE_URI_ME="mongo-express"  # Mongo Express image
+PORT_NPM=80
 PORT_ME=8081
 REGION="us-east-1"
 VPC_CIDR="10.0.0.0/16"
 SUBNET_CIDR1="10.0.1.0/24"
 SUBNET_CIDR2="10.0.2.0/24"
-ALB_NAME="nginx-alb"
-TG_NAME_NGINX="nginx-tg"
-TG_NAME_NPM="mongo-express-tg"
-SG_NAME="nginx-sg"
+ALB_NAME="ME-NPM-alb"
+TG_NAME_NGINX_PM="NPM-tg"
+TG_NAME_ME="mongo-express-tg"
+SG_NAME="ME-NPM-sg"
 EXECUTION_ROLE_NAME="ecsTaskExecutionRole"
 TASK_ROLE_NAME="ecsTaskRole"
 
@@ -197,7 +197,7 @@ aws ec2 describe-security-groups --query 'SecurityGroups[*].[GroupId, GroupName,
 
 # Set Ingress Rule if not exists
 if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissions[?FromPort==`8000` && ToPort==`24000` && IpProtocol==`tcp`]' --output text | grep -q '0.0.0.0/0'; then
-  aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT_NGINX --cidr 0.0.0.0/0
+  aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT_NPM --cidr 0.0.0.0/0
   #check_error "Failed to set security group ingress rules"
   aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT_ME --cidr 0.0.0.0/0
   #check_error "Failed to set security group ingress rules"
@@ -239,9 +239,9 @@ sleep 30  # Allow time for ALB to become available
 # Create Target Group for NGINX with ip target type
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Target Group for NGINX..."
 TG_ARN_NGINX=$(aws elbv2 create-target-group \
-  --name $TG_NAME_NGINX \
+  --name $TG_NAME_NGINX_PM \
   --protocol HTTP \
-  --port $PORT_NGINX \
+  --port $PORT_NPM \
   --vpc-id $VPC_ID \
   --target-type ip \
   --query 'TargetGroups[0].TargetGroupArn' \
@@ -251,7 +251,7 @@ CREATED_RESOURCES["TG_NGINX"]=$TG_ARN_NGINX
 
 # Create Target Group for Mongo Express with ip target type
 TG_ARN_NPM=$(aws elbv2 create-target-group \
-  --name $TG_NAME_NPM \
+  --name $TG_NAME_ME \
   --protocol HTTP \
   --port 8081 \
   --vpc-id $VPC_ID \
@@ -272,7 +272,7 @@ check_error "Failed to configure health check for mongo express"
 
 # Create Listener for NGINX
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Listener for NGINX..."
-aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT_NGINX --default-actions Type=forward,TargetGroupArn=$TG_ARN_NGINX
+aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT_NPM --default-actions Type=forward,TargetGroupArn=$TG_ARN_NGINX
 check_error "Failed to create Listener for NGINX"
 
 # Create Listener for Mongo Express
@@ -312,7 +312,7 @@ aws iam attach-role-policy --role-name $EXECUTION_ROLE_NAME --policy-arn arn:aws
 
 # Register Task Definition for NGINX
 NGINX_REGISTER_OUTPUT=$(aws ecs register-task-definition \
-  --family $TASK_FAMILY_NGINX \
+  --family $TASK_FAMILY_NPM \
   --network-mode awsvpc \
   --requires-compatibilities FARGATE \
   --cpu "256" --memory "512" \
@@ -320,8 +320,8 @@ NGINX_REGISTER_OUTPUT=$(aws ecs register-task-definition \
   --container-definitions "[
     {
       \"name\": \"$CONTAINER_NAME_NGINX\",
-      \"image\": \"$IMAGE_URI_NGINX\",
-      \"portMappings\": [{\"containerPort\": $PORT_NGINX, \"hostPort\": $PORT_NGINX, \"protocol\": \"tcp\"}],
+      \"image\": \"$IMAGE_URI_NPM\",
+      \"portMappings\": [{\"containerPort\": $PORT_NPM, \"hostPort\": $PORT_NPM, \"protocol\": \"tcp\"}],
       \"essential\": true
     }
   ]" 2>&1)
@@ -341,7 +341,7 @@ NPM_REGISTER_OUTPUT=$(aws ecs register-task-definition \
   --container-definitions "[
     {
       \"name\": \"$CONTAINER_NAME_ME\",
-      \"image\": \"$IMAGE_URI_NPM\",
+      \"image\": \"$IMAGE_URI_ME\",
       \"portMappings\": [{\"containerPort\": $PORT_ME, \"hostPort\": $PORT_ME, \"protocol\": \"tcp\"}],
       \"essential\": true
     }
@@ -354,15 +354,15 @@ fi
 
 
 # Create ECS Service for NGINX
-SERVICE_STATUS_NGINX=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME_NGINX --query 'services[0].status' --output text 2>&1)
+SERVICE_STATUS_NGINX=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME_ME --query 'services[0].status' --output text 2>&1)
 
 if [ "$SERVICE_STATUS_NGINX" != "ACTIVE" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for NGINX..."
-  NGINX_SERVICE_OUTPUT=$(aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NGINX \
-    --task-definition $TASK_FAMILY_NGINX --desired-count 1 \
+  NGINX_SERVICE_OUTPUT=$(aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_ME \
+    --task-definition $TASK_FAMILY_NPM --desired-count 1 \
     --launch-type FARGATE \
     --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
-    --load-balancers "targetGroupArn=$TG_ARN_NGINX,containerName=$CONTAINER_NAME_NGINX,containerPort=$PORT_NGINX" \
+    --load-balancers "targetGroupArn=$TG_ARN_NGINX,containerName=$CONTAINER_NAME_NGINX,containerPort=$PORT_NPM" \
     --query "service.serviceName" --output text 2>&1)
 
   if [ $? -ne 0 ]; then
@@ -374,7 +374,7 @@ if [ "$SERVICE_STATUS_NGINX" != "ACTIVE" ]; then
 else
   echo "ECS Service for NGINX already exists and is active."
 fi
-CREATED_RESOURCES["ECS_SERVICE_NGINX"]=$SERVICE_NAME_NGINX
+CREATED_RESOURCES["ECS_SERVICE_NGINX"]=$SERVICE_NAME_ME
 
 # Create ECS Service for Mongo Express
 SERVICE_STATUS_NPM=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME_NPM --query 'services[0].status' --output text 2>&1)
