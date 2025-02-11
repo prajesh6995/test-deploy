@@ -267,7 +267,7 @@ aws elbv2 modify-target-group \
   --target-group-arn $TG_ARN_NPM \
   --health-check-path /login \
   --health-check-port 80 \
-  --matcher HttpCode=200,302,401
+  --matcher HttpCode="200,302,401"
 check_error "Failed to configure health check for Nginx Proxy Manager"
 
 # Create Listener for NGINX
