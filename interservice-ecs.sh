@@ -99,6 +99,9 @@ AZ1=${AVAILABLE_AZS[0]}
 AZ2=${AVAILABLE_AZS[1]}
 
 # Create ECS Cluster
+
+aws ecs list-clusters --output table
+
 if ! aws ecs describe-clusters --clusters $CLUSTER_NAME --query 'clusters[0].status' --output text | grep -q 'ACTIVE'; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Cluster..."
   aws ecs create-cluster --cluster-name $CLUSTER_NAME
