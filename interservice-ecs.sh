@@ -16,9 +16,6 @@ REGION="us-east-1"
 VPC_CIDR="10.0.0.0/16"
 SUBNET_CIDR1="10.0.1.0/24"
 SUBNET_CIDR2="10.0.2.0/24"
-ALB_NAME="ME-NPM-alb"
-TG_NAME_NPM_PM="NPM-tg"
-TG_NAME_ME="mongo-express-tg"
 SG_NAME="ME-NPM-sg"
 EXECUTION_ROLE_NAME="ecsTaskExecutionRole"
 TASK_ROLE_NAME="ecsTaskRole"
@@ -32,9 +29,6 @@ CREATED_RESOURCES=(
   ["SUBNET1"]=""
   ["SUBNET2"]=""
   ["SG"]=""
-  ["ALB"]=""
-  ["TG_NPM"]=""
-  ["TG_ME"]=""
   ["ECS_SERVICE_ME"]=""
   ["ECS_SERVICE_NPM"]=""
 )
@@ -75,14 +69,6 @@ rollback() {
           echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleting Security Group..."
           aws ec2 delete-security-group --group-id ${CREATED_RESOURCES[$resource]}
           ;;
-        "ALB")
-          echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleting Load Balancer..."
-          aws elbv2 delete-load-balancer --load-balancer-arn ${CREATED_RESOURCES[$resource]}
-          ;;
-        "TG_NPM"|"TG_ME")
-          echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleting Target Group ${CREATED_RESOURCES[$resource]}..."
-          aws elbv2 delete-target-group --target-group-arn ${CREATED_RESOURCES[$resource]}
-          ;;
         "ECS_SERVICE_NPM"|"ECS_SERVICE_ME")
           echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleting ECS Service ${CREATED_RESOURCES[$resource]}..."
           aws ecs delete-service --cluster $CLUSTER_NAME --service ${CREATED_RESOURCES[$resource]} --force
@@ -99,9 +85,6 @@ AZ1=${AVAILABLE_AZS[0]}
 AZ2=${AVAILABLE_AZS[1]}
 
 # Create ECS Cluster
-
-aws ecs list-clusters --output table
-
 CLUSTER_STATUS=$(aws ecs describe-clusters --clusters $CLUSTER_NAME --region $REGION --query 'clusters[0].status' --output text)
 
 echo "CLUSTER_STATUS : $CLUSTER_STATUS"
@@ -145,7 +128,7 @@ fi
 
 # Create Route Table and associate with subnets
 ROUTE_TABLE_ID=$(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" --query 'RouteTables[0].RouteTableId' --output text)
-if ! aws ec2 describe-route-tables --route-table-ids $ROUTE_TABLE_ID --query 'Routes[?DestinationCidrBlock==`0.0.0.0/0`]' --output text | grep -q '0.0.0.0/0'; then
+if ! aws ec2 describe-route-tables --route-table-ids $ROUTE_TABLE_ID --query 'Routes[?DestinationCidrBlock==0.0.0.0/0]' --output text | grep -q '0.0.0.0/0'; then
   aws ec2 create-route --route-table-id $ROUTE_TABLE_ID --destination-cidr-block 0.0.0.0/0 --gateway-id $IGW_ID
   check_error "Failed to create route to Internet Gateway"
 else
@@ -196,7 +179,7 @@ echo "SG_ID: $SG_ID"
 aws ec2 describe-security-groups --query 'SecurityGroups[*].[GroupId, GroupName, Description, VpcId]' --output table
 
 # Set Ingress Rule if not exists
-if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissions[?FromPort==`8000` && ToPort==`24000` && IpProtocol==`tcp`]' --output text | grep -q '0.0.0.0/0'; then
+if ! aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissions[?FromPort==8000 && ToPort==24000 && IpProtocol==tcp]' --output text | grep -q '0.0.0.0/0'; then
   aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT_NPM --cidr 0.0.0.0/0
   #check_error "Failed to set security group ingress rules"
   aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port $PORT_ME --cidr 0.0.0.0/0
@@ -226,59 +209,6 @@ else
 
   check_error "Failed to set security group egress rules"
 fi
-
-
-
-# Create Load Balancer
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Load Balancer..."
-ALB_ARN=$(aws elbv2 create-load-balancer --name $ALB_NAME --subnets $SUBNET_ID1 $SUBNET_ID2 --security-groups $SG_ID --query 'LoadBalancers[0].LoadBalancerArn' --output text)
-check_error "Failed to create Load Balancer"
-CREATED_RESOURCES["ALB"]=$ALB_ARN
-sleep 30  # Allow time for ALB to become available
-
-# Create Target Group for NPM with ip target type
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Target Group for NPM..."
-TG_ARN_NPM=$(aws elbv2 create-target-group \
-  --name $TG_NAME_NPM_PM \
-  --protocol HTTP \
-  --port $PORT_NPM \
-  --vpc-id $VPC_ID \
-  --target-type ip \
-  --query 'TargetGroups[0].TargetGroupArn' \
-  --output text)
-check_error "Failed to create Target Group for NPM"
-CREATED_RESOURCES["TG_NPM"]=$TG_ARN_NPM
-
-# Create Target Group for Mongo Express with ip target type
-TG_ARN_ME=$(aws elbv2 create-target-group \
-  --name $TG_NAME_ME \
-  --protocol HTTP \
-  --port 8081 \
-  --vpc-id $VPC_ID \
-  --target-type ip \
-  --query 'TargetGroups[0].TargetGroupArn' \
-  --output text)
-check_error "Failed to create Target Group for Mongo Express"
-CREATED_RESOURCES["TG_ME"]=$TG_ARN_ME
-
-# Modify health check for Mongo Express
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Configuring health check for mongo express..."
-aws elbv2 modify-target-group \
-  --target-group-arn $TG_ARN_ME \
-  --health-check-path /login \
-  --health-check-port 8081 \
-  --matcher '{"HttpCode": "200,302,401"}'
-check_error "Failed to configure health check for mongo express"
-
-# Create Listener for NPM
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Listener for NPM..."
-aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT_NPM --default-actions Type=forward,TargetGroupArn=$TG_ARN_NPM
-check_error "Failed to create Listener for NPM"
-
-# Create Listener for Mongo Express
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating Listener for Mongo Express..."
-aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port $PORT_ME --default-actions Type=forward,TargetGroupArn=$TG_ARN_ME
-check_error "Failed to create Listener for Mongo Express"
 
 # Create ECS Task Execution Role
 # Check and Create IAM Role for ECS Task Execution
@@ -352,17 +282,16 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-
-# Create ECS Service for NPM
+# Create ECS Service for NPM with Service Discovery
 SERVICE_STATUS_NPM=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME_NPM --query 'services[0].status' --output text 2>&1)
 
 if [ "$SERVICE_STATUS_NPM" != "ACTIVE" ]; then
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for NPM..."
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for NPM with Service Discovery..."
   NPM_SERVICE_OUTPUT=$(aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_NPM \
     --task-definition $TASK_FAMILY_NPM --desired-count 1 \
     --launch-type FARGATE \
     --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
-    --load-balancers "targetGroupArn=$TG_ARN_NPM,containerName=$CONTAINER_NAME_NPM,containerPort=$PORT_NPM" \
+    --service-registries "registryArn=arn:aws:servicediscovery:$REGION:$(aws sts get-caller-identity --query Account --output text):service/srv-$(uuidgen)" \
     --query "service.serviceName" --output text 2>&1)
 
   if [ $? -ne 0 ]; then
@@ -376,16 +305,16 @@ else
 fi
 CREATED_RESOURCES["ECS_SERVICE_NPM"]=$SERVICE_NAME_NPM
 
-# Create ECS Service for Mongo Express
+# Create ECS Service for Mongo Express with Service Discovery
 SERVICE_STATUS_ME=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME_ME --query 'services[0].status' --output text 2>&1)
 
 if [ "$SERVICE_STATUS_ME" != "ACTIVE" ]; then
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for Mongo Express..."
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - Creating ECS Service for Mongo Express with Service Discovery..."
   ME_SERVICE_OUTPUT=$(aws ecs create-service --cluster $CLUSTER_NAME --service-name $SERVICE_NAME_ME \
     --task-definition $TASK_FAMILY_ME --desired-count 1 \
     --launch-type FARGATE \
     --network-configuration "awsvpcConfiguration={subnets=[\"$SUBNET_ID1\",\"$SUBNET_ID2\"],securityGroups=[\"$SG_ID\"],assignPublicIp=ENABLED}" \
-    --load-balancers "targetGroupArn=$TG_ARN_NPM,containerName=$CONTAINER_NAME_ME,containerPort=$PORT_ME" \
+    --service-registries "registryArn=arn:aws:servicediscovery:$REGION:$(aws sts get-caller-identity --query Account --output text):service/srv-$(uuidgen)" \
     --query "service.serviceName" --output text 2>&1)
 
   if [ $? -ne 0 ]; then
@@ -399,7 +328,6 @@ else
 fi
 CREATED_RESOURCES["ECS_SERVICE_ME"]=$SERVICE_NAME_ME
 
-# Output Load Balancer DNS
-ALB_DNS=$(aws elbv2 describe-load-balancers --load-balancer-arns $ALB_ARN --query 'LoadBalancers[0].DNSName' --output text)
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment successful! Access your NPM application at http://$ALB_DNS"
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment successful! Access your Mongo Express application at http://$ALB_DNS:$PORT_ME"
+# Output Service Discovery DNS
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment successful! Access your NPM application using Service Discovery DNS."
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Deployment successful! Access your Mongo Express application using Service Discovery DNS."
