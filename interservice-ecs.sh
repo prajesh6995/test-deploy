@@ -211,7 +211,7 @@ NAMESPACE_ID=$(aws servicediscovery create-private-dns-namespace \
   --output text)
 check_error "Failed to create Service Discovery Namespace"
 
-echo"NAMESPACE_ID : $NAMESPACE_ID"
+echo "NAMESPACE_ID : $NAMESPACE_ID"
 
 # Wait for the namespace to be created
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Waiting for Service Discovery Namespace to be created..."
